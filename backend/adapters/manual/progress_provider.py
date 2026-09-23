@@ -1,0 +1,1 @@
+"""Manual reading progress adapter."""

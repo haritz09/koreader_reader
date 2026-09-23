@@ -1,0 +1,23 @@
+# Entorno virtual local
+/venv/
+/backend/.venv/
+
+# Variables de entorno locales
+/backend/.env
+
+# Archivos generados por Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Herramientas de testing y cobertura
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribuciones y metadatos de paquetes
+build/
+dist/
+*.egg-info/
+
+overview.md
