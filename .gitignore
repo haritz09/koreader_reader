@@ -20,9 +20,4 @@ build/
 dist/
 *.egg-info/
 
-# Configuración local de agentes
-/AGENTS.md
-/.github/
-/.opencode/
-
 overview.md
