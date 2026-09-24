@@ -1,8 +1,14 @@
 from typing import Protocol
 
+from core.domain.entities.reading_progress import ReadingProgress
+
 
 class ReadingProgressProvider(Protocol):
-    """Port for importing reading progress from any client or device."""
+    """Port for resolving client-specific progress into domain progress."""
 
-    def get_progress(self, book_id: str) -> float:
+    async def resolve_progress(
+        self,
+        document_hash: str,
+        position: float,
+    ) -> ReadingProgress | None:
         ...

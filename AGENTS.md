@@ -1,5 +1,7 @@
 # Project Agent Instructions
 
+The durable project decisions are recorded in [MEMORY.md](MEMORY.md). Update it when an architectural or integration decision is made that future work must preserve.
+
 ## Scope
 These instructions apply to the entire repository. Read the relevant skill before changing code:
 
@@ -25,6 +27,8 @@ These instructions apply to the entire repository. Read the relevant skill befor
 3. Add or update focused tests for changed behavior, especially spoiler filtering and API contracts.
 4. Run the narrowest relevant test or type check, then the broader suite when practical.
 5. Do not weaken anti-spoiler filtering to make a test or query pass.
+
+Tests must be behavior-first: derive cases from the feature's public contract and realistic failure modes, not from the current implementation structure. Do not add tests merely to mirror private methods or make coverage numbers increase.
 
 ## Definition of done
 
