@@ -1,22 +1,14 @@
 import asyncio
 import hashlib
-import io
-import zipfile
 
 import pytest
 
 from core.application.use_cases.process_ebook import (
+    EbookTooLargeError,
     InvalidEbookError,
     UploadEbookUseCase,
 )
-
-
-def epub_bytes() -> bytes:
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("mimetype", "application/epub+zip")
-        archive.writestr("chapter.xhtml", "<html><body>Text</body></html>")
-    return buffer.getvalue()
+from tests.fixtures.epub import valid_epub_bytes
 
 
 class FakeBookRepository:
@@ -62,7 +54,7 @@ class FakeQueue:
 
 
 def test_upload_stores_md5_and_enqueues_processing() -> None:
-    content = epub_bytes()
+    content = valid_epub_bytes()
     repository = FakeBookRepository()
     storage = FakeStorage()
     queue = FakeQueue()
@@ -72,8 +64,9 @@ def test_upload_stores_md5_and_enqueues_processing() -> None:
 
     assert result.document_hash == hashlib.md5(content).hexdigest()
     assert result.processing_status == "pending"
-    assert storage.saved[1] == content
-    assert queue.enqueued[0] == result.book_id
+    assert repository.created.document_hash == result.document_hash
+    assert storage.saved == (f"books/{result.book_id}.epub", content)
+    assert queue.enqueued == (result.book_id, repository.created.storage_key)
 
 
 def test_upload_reuses_existing_book_without_reprocessing() -> None:
@@ -91,7 +84,7 @@ def test_upload_reuses_existing_book_without_reprocessing() -> None:
     queue = FakeQueue()
     use_case = UploadEbookUseCase(repository, storage, queue)
 
-    content = epub_bytes()
+    content = valid_epub_bytes()
     repository.existing.document_hash = hashlib.md5(content).hexdigest()
     result = asyncio.run(use_case.execute(content))
 
@@ -105,3 +98,23 @@ def test_upload_rejects_non_epub_content() -> None:
 
     with pytest.raises(InvalidEbookError):
         asyncio.run(use_case.execute(b"not an epub"))
+
+
+def test_upload_rejects_structurally_invalid_epub_archive() -> None:
+    use_case = UploadEbookUseCase(FakeBookRepository(), FakeStorage(), FakeQueue())
+
+    with pytest.raises(InvalidEbookError):
+        asyncio.run(use_case.execute(b"PK\x03\x04"))
+
+
+def test_upload_rejects_content_above_configured_limit() -> None:
+    content = valid_epub_bytes()
+    use_case = UploadEbookUseCase(
+        FakeBookRepository(),
+        FakeStorage(),
+        FakeQueue(),
+        max_size_bytes=len(content) - 1,
+    )
+
+    with pytest.raises(EbookTooLargeError):
+        asyncio.run(use_case.execute(content))

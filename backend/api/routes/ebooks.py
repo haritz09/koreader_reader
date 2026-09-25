@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from api.dependencies import get_book_repository, get_upload_ebook_use_case
 from api.schemas.ebooks import EbookStatusResponse, EbookUploadResponse
 from core.application.use_cases.process_ebook import (
+	EbookTooLargeError,
 	InvalidEbookError,
 	UploadEbookUseCase,
 )
@@ -10,7 +11,11 @@ from core.application.use_cases.process_ebook import (
 router = APIRouter(prefix="/ebooks", tags=["ebooks"])
 
 
-@router.get("/{book_id}", response_model=EbookStatusResponse)
+@router.get(
+	"/{book_id}",
+	response_model=EbookStatusResponse,
+	response_model_exclude_none=True,
+)
 async def get_ebook_status(
 	book_id: str,
 	book_repository=Depends(get_book_repository),
@@ -23,6 +28,7 @@ async def get_ebook_status(
 		document_hash=book.document_hash,
 		processing_status=book.processing_status,
 		progress_position=book.progress_position,
+		processing_error=book.processing_error,
 	)
 
 
@@ -33,6 +39,11 @@ async def upload_ebook(
 ) -> EbookUploadResponse:
 	try:
 		result = await use_case.execute(await file.read())
+	except EbookTooLargeError as error:
+		raise HTTPException(
+			status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+			detail=str(error),
+		) from error
 	except InvalidEbookError as error:
 		raise HTTPException(
 			status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

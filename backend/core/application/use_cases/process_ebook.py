@@ -15,6 +15,10 @@ class InvalidEbookError(Exception):
 	"""Raised when the uploaded content is not a valid EPUB archive."""
 
 
+class EbookTooLargeError(Exception):
+	"""Raised when an upload exceeds the configured size limit."""
+
+
 @dataclass(frozen=True)
 class EbookUploadResult:
 	book_id: str
@@ -28,13 +32,20 @@ class UploadEbookUseCase:
 		repository: BookRepository,
 		storage: EbookStorage,
 		queue: EbookProcessingQueue,
+		max_size_bytes: int = 10 * 1024 * 1024,
 	):
 		self._repository = repository
 		self._storage = storage
 		self._queue = queue
+		self._max_size_bytes = max_size_bytes
 
 	async def execute(self, content: bytes) -> EbookUploadResult:
-		if not content or not zipfile.is_zipfile(io.BytesIO(content)):
+		if len(content) > self._max_size_bytes:
+			raise EbookTooLargeError(
+				f"Ebook exceeds the maximum size of {self._max_size_bytes} bytes"
+			)
+
+		if not self._is_valid_epub(content):
 			raise InvalidEbookError("Uploaded file is not a valid EPUB archive")
 
 		document_hash = hashlib.md5(content).hexdigest()
@@ -56,3 +67,20 @@ class UploadEbookUseCase:
 			document_hash=book.document_hash,
 			processing_status=book.processing_status,
 		)
+
+	@staticmethod
+	def _is_valid_epub(content: bytes) -> bool:
+		if not content or not zipfile.is_zipfile(io.BytesIO(content)):
+			return False
+
+		try:
+			with zipfile.ZipFile(io.BytesIO(content)) as archive:
+				names = archive.namelist()
+				return (
+					bool(names)
+					and names[0] == "mimetype"
+					and archive.read("mimetype") == b"application/epub+zip"
+					and "META-INF/container.xml" in names
+				)
+		except (KeyError, OSError, zipfile.BadZipFile):
+			return False
