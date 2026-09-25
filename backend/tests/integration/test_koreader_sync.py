@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from adapters.koreader.progress_provider import KoreaderProgressAdapter
-from api.dependencies import get_koreader_progress_adapter
+from api.dependencies import get_book_repository, get_koreader_progress_adapter
 from main import app
 
 
@@ -12,10 +12,15 @@ class InMemoryBookRepository:
     async def resolve_book_id(self, document_hash: str) -> str | None:
         return self._books.get(document_hash)
 
+    async def update_progress(self, book_id: str, position: float) -> None:
+        pass
+
 
 def client_for_books(books: dict[str, str]) -> TestClient:
+    repository = InMemoryBookRepository(books)
+    app.dependency_overrides[get_book_repository] = lambda: repository
     app.dependency_overrides[get_koreader_progress_adapter] = lambda: (
-        KoreaderProgressAdapter(InMemoryBookRepository(books))
+        KoreaderProgressAdapter(repository)
     )
     return TestClient(app)
 
