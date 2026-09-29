@@ -19,7 +19,8 @@ def _sync_database_url() -> str:
 
 def _truncate_all_tables(conn: psycopg.Connection) -> None:
     rows = conn.execute(
-        "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+        "SELECT tablename FROM pg_tables "
+        "WHERE schemaname = 'public' AND tablename <> 'alembic_version'"
     ).fetchall()
     if rows:
         table_names = ", ".join(f"{row[0]}" for row in rows)

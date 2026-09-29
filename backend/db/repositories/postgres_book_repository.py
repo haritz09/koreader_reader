@@ -107,3 +107,11 @@ class PostgresBookRepository:
 		book.processing_status = "failed"
 		book.processing_error = error[:2000]
 		await self._session.commit()
+
+	async def get_chunk_ids_by_book(self, book_id: str) -> list[tuple[str, int]]:
+		result = await self._session.execute(
+			select(ChunkRecord.id, ChunkRecord.chunk_index)
+			.where(ChunkRecord.book_id == book_id)
+			.order_by(ChunkRecord.chunk_index)
+		)
+		return result.all()

@@ -3,7 +3,7 @@
 import asyncio
 
 from bs4 import BeautifulSoup
-from ebooklib import epub, ITEM_DOCUMENT
+from ebooklib import ITEM_DOCUMENT, epub
 
 from core.domain.entities.chapter import Chapter
 

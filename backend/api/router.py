@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from api.routes.progress import router as progress_router
 from api.routes.ebooks import router as ebooks_router
+from api.routes.progress import router as progress_router
 
 api_router = APIRouter(prefix="/api")
 

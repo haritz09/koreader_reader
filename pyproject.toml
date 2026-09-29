@@ -1,0 +1,31 @@
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = ["backend/alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "BLE", "RUF"]
+ignore = [
+    # B008 is required by FastAPI dependency injection (`Depends`, `File`) and by
+    # frozen dataclass defaults, both of which are intentional in this codebase.
+    "B008",
+    # UP043 rewrites explicit `Generator[X, None, None]` into the PEP 696 form,
+    # which only benefits type checkers. The explicit form stays readable.
+    "UP043",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Model imports register tables on Base.metadata for autogenerate support.
+"backend/alembic/env.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+# `backend` is the import root; these are project modules, not third-party ones.
+known-first-party = [
+    "adapters",
+    "api",
+    "core",
+    "db",
+    "main",
+    "tests",
+    "workers",
+]

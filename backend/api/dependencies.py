@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adapters.koreader.progress_provider import KoreaderProgressAdapter

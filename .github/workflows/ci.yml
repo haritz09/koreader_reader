@@ -1,0 +1,167 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install ruff
+        run: pip install -r requirements-dev.txt
+
+      - name: Run ruff
+        run: ruff check .
+
+  test:
+    name: Unit and integration tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests without external services
+        run: pytest -m "not postgres and not e2e" -rs
+
+  postgres:
+    name: PostgreSQL integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ebook_analyzer
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ebook_analyzer"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/ebook_analyzer
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run PostgreSQL tests
+        run: pytest -m postgres -rs | tee postgres-tests.log
+        shell: bash
+
+      - name: Fail when the PostgreSQL tests were skipped
+        run: |
+          if grep -qE "[0-9]+ skipped" postgres-tests.log; then
+            echo "::error::PostgreSQL tests were skipped instead of executed."
+            exit 1
+          fi
+        shell: bash
+
+  e2e:
+    name: End-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      RUN_E2E: "1"
+      E2E_BASE_URL: http://127.0.0.1:8000
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/ebook_analyzer
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Start the Compose stack
+        working-directory: .
+        run: docker compose up -d --build --wait
+
+      - name: Wait for the API
+        working-directory: .
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8000/openapi.json; then
+              echo "API is ready."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::The API did not become ready."
+          docker compose logs
+          exit 1
+
+      - name: Run end-to-end tests
+        run: pytest -m e2e -rs | tee e2e-tests.log
+        shell: bash
+
+      - name: Fail when the end-to-end tests were skipped
+        run: |
+          if grep -qE "[0-9]+ skipped" e2e-tests.log; then
+            echo "::error::End-to-end tests were skipped instead of executed."
+            exit 1
+          fi
+        shell: bash
+
+      - name: Dump Compose logs
+        if: failure()
+        working-directory: .
+        run: docker compose logs
+
+      - name: Stop the Compose stack
+        if: always()
+        working-directory: .
+        run: docker compose down -v

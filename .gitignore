@@ -1,23 +1,46 @@
 # Entorno virtual local
 .venv/
-/backend/.venv/
 
 # Variables de entorno locales
-/backend/.env
+.env
+.env.*
+!.env.example
+
+# Datos locales de la aplicacion (ebooks subidos)
+**/data/ebooks/
 
 # Archivos generados por Python
 __pycache__/
 *.py[cod]
 *$py.class
 
-# Herramientas de testing y cobertura
+# Herramientas de lint, testing y cobertura
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 .coverage
+coverage.xml
 htmlcov/
+
+# Logs
+*.log
 
 # Distribuciones y metadatos de paquetes
 build/
 dist/
 *.egg-info/
+
+# Node y frontend
+node_modules/
+.next/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editores y sistema operativo
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
 
 overview.md
