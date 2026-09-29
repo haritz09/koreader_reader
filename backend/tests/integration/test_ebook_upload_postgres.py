@@ -1,15 +1,6 @@
-from collections.abc import AsyncIterator
-
 import pytest
-from fastapi.testclient import TestClient
 
-from api.dependencies import (
-    get_book_repository,
-    get_ebook_processing_queue,
-    get_ebook_storage,
-)
-from db.repositories.postgres_book_repository import PostgresBookRepository
-from db.session import session_factory
+from api.dependencies import get_ebook_processing_queue, get_ebook_storage
 from main import app
 from tests.fixtures.epub import valid_epub_bytes
 
@@ -34,34 +25,28 @@ class RecordingQueue:
         self.enqueued.append((book_id, storage_key))
 
 
-async def real_book_repository() -> AsyncIterator[PostgresBookRepository]:
-    async with session_factory() as session:
-        yield PostgresBookRepository(session)
-
-
 @pytest.mark.postgres
 def test_upload_persists_book_and_deduplicates_against_postgres(
     clean_postgres_database,
     postgres_connection,
+    postgres_app_client,
 ) -> None:
     storage = RecordingStorage()
     queue = RecordingQueue()
-    app.dependency_overrides[get_book_repository] = real_book_repository
     app.dependency_overrides[get_ebook_storage] = lambda: storage
     app.dependency_overrides[get_ebook_processing_queue] = lambda: queue
-    client = TestClient(app)
     content = valid_epub_bytes()
 
     try:
-        first_response = client.post(
+        first_response = postgres_app_client.post(
             "/api/v1/ebooks",
             files={"file": ("book.epub", content, "application/epub+zip")},
         )
-        duplicate_response = client.post(
+        duplicate_response = postgres_app_client.post(
             "/api/v1/ebooks",
             files={"file": ("book-copy.epub", content, "application/epub+zip")},
         )
-        status_response = client.get(
+        status_response = postgres_app_client.get(
             f"/api/v1/ebooks/{first_response.json()['book_id']}"
         )
     finally:
