@@ -47,4 +47,9 @@ def get_upload_ebook_use_case(
 	storage: EbookStorage = Depends(get_ebook_storage),
 	queue: EbookProcessingQueue = Depends(get_ebook_processing_queue),
 ) -> UploadEbookUseCase:
-	return UploadEbookUseCase(book_repository, storage, queue)
+	return UploadEbookUseCase(
+		book_repository,
+		storage,
+		queue,
+		max_size_bytes=settings.max_ebook_size_bytes,
+	)

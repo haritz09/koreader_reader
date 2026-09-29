@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ebook_analyzer"
     redis_url: str = "redis://localhost:6379"
     ebook_storage_path: str = "./data/ebooks"
-    max_ebook_size_bytes: int = 50 * 1024 * 1024
+    max_ebook_size_bytes: int = 10 * 1024 * 1024
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

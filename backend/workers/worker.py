@@ -13,20 +13,28 @@ from db.session import session_factory
 async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 	storage_path = str(Path(settings.ebook_storage_path) / storage_key)
 	parser = EpubParser()
-	chapters = await parser.parse(storage_path)
-	chunks = chunk_chapters(chapters)
 	storage = LocalEbookStorage(Path(settings.ebook_storage_path))
 	async with session_factory() as session:
 		repository = PostgresBookRepository(session)
 		await repository.mark_processing(book_id)
+		try:
+			chapters = await parser.parse(storage_path)
+		except Exception as error:
+			await repository.mark_failed(book_id, str(error))
+			return
+
+		chunks = chunk_chapters(chapters)
 		try:
 			await repository.replace_derived_content(book_id, chapters, chunks)
 			await repository.mark_ready(book_id)
 			await storage.delete(storage_key)
 		except Exception as error:
 			await repository.mark_failed(book_id, str(error))
+			if isinstance(error, (ValueError, EOFError)):
+				return
 			raise
 
 
 class WorkerSettings:
 	functions = [process_ebook]
+	max_tries = 3

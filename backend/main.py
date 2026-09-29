@@ -8,8 +8,3 @@ app = FastAPI(
 )
 
 app.include_router(api_router)
-
-
-@app.get("/health", tags=["system"])
-def health_check() -> dict[str, str]:
-    return {"status": "ok"}
