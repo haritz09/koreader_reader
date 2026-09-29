@@ -1,6 +1,9 @@
 """ARQ worker entrypoint."""
 
 from pathlib import Path
+from typing import ClassVar
+
+from arq.connections import RedisSettings
 
 from adapters.llm.openai_provider import OpenAIProvider
 from adapters.storage.epub_parser import EpubParser
@@ -31,7 +34,7 @@ async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 		await repository.mark_processing(book_id)
 		try:
 			chapters = await parser.parse(storage_path)
-		except Exception as error:
+		except Exception as error:  # noqa: BLE001 - any parse failure must mark the book failed
 			await repository.mark_failed(book_id, str(error))
 			return
 
@@ -55,6 +58,7 @@ async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 
 
 class WorkerSettings:
-	functions = [process_ebook]
+	functions: ClassVar[list] = [process_ebook]
 	on_startup = startup
 	max_tries = 3
+	redis_settings = RedisSettings.from_dsn(settings.redis_url)

@@ -2,8 +2,6 @@
 
 import asyncio
 
-import pytest
-
 from core.domain.entities.chunk import Chunk
 from core.domain.entities.knowledge import (
     Entity,

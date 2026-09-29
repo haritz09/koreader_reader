@@ -1,8 +1,10 @@
 import asyncio
+from urllib.parse import urlparse
 
 import pytest
 
 import workers.worker as worker_module
+from core.config import settings
 
 
 class FakeSessionContext:
@@ -118,3 +120,10 @@ def test_worker_allows_three_attempts_for_retryable_jobs() -> None:
 
 def test_worker_settings_has_startup_hook() -> None:
 	assert worker_module.WorkerSettings.on_startup is worker_module.startup
+
+
+def test_worker_connects_to_the_configured_redis() -> None:
+	redis_settings = worker_module.WorkerSettings.redis_settings
+
+	assert redis_settings.host == urlparse(settings.redis_url).hostname
+	assert redis_settings.port == urlparse(settings.redis_url).port

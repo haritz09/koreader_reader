@@ -1,6 +1,5 @@
 import time
 
-import httpx
 import pytest
 
 from tests.fixtures.epub import valid_epub_bytes

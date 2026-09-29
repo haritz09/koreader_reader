@@ -1,0 +1,31 @@
+# El Dockerfile solo copia backend/ al contexto de la imagen. Todo lo de aqui
+# reduce el contexto de build (156 MB -> <1 MB) sin alterar el codigo fuente.
+
+.git/
+.github/
+.agents/
+frontend/
+.venv/
+**/.venv/
+AGENTS.md
+MEMORY.md
+Dockerfile
+docker-compose.yml
+
+# A diferencia de .gitignore, aqui un patron sin "/" SOLO casa en la raiz
+# del contexto. Para alcanzar backend/.env hacen falta los prefijos "**/".
+**/.env
+**/.env.*
+!**/.env.example
+
+# Artefactos generados
+**/__pycache__/
+**/*.py[cod]
+**/data/ebooks/
+**/htmlcov/
+**/coverage.xml
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/*.log
+**/overview.md

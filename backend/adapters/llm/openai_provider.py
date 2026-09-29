@@ -2,11 +2,18 @@
 
 import json
 import logging
+from uuid import uuid4
 
 import httpx
 
 from core.config import settings
-from core.domain.entities.knowledge import KnowledgeExtractionResult
+from core.domain.entities.knowledge import (
+    Entity,
+    Event,
+    Fact,
+    KnowledgeExtractionResult,
+    Location,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +73,8 @@ class OpenAIProvider:
             logger.warning("LLM returned invalid JSON: %s", content[:200])
             return KnowledgeExtractionResult(entities=[], facts=[], events=[], locations=[])
 
-        from core.domain.entities.knowledge import Entity, Event, Fact, Location
-        from uuid import uuid4
-
-        _uid = lambda: str(uuid4())
+        def _uid() -> str:
+            return str(uuid4())
 
         entities = [
             Entity(entity_id=_uid(), book_id="", chunk_id="", name=e["name"], entity_type=e.get("entity_type", "other"), reading_position=0.0)
