@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     ebook_storage_path: str = "./data/ebooks"
     max_ebook_size_bytes: int = 10 * 1024 * 1024
+    llm_api_key: str = ""
+    llm_model: str = "gpt-4o-mini"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

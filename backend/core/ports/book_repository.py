@@ -41,3 +41,6 @@ class BookRepository(Protocol):
 
     async def mark_failed(self, book_id: str, error: str) -> None:
         ...
+
+    async def get_chunk_ids_by_book(self, book_id: str) -> list[tuple[str, int]]:
+        ...
