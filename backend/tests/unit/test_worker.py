@@ -127,3 +127,144 @@ def test_worker_connects_to_the_configured_redis() -> None:
 
 	assert redis_settings.host == urlparse(settings.redis_url).hostname
 	assert redis_settings.port == urlparse(settings.redis_url).port
+
+
+def test_worker_settings_registers_the_graph_generation_job() -> None:
+	assert worker_module.generate_graph in worker_module.WorkerSettings.functions
+
+
+class FakeGraphBookRepository:
+	def __init__(
+		self,
+		state=None,
+		candidates=None,
+		stored=None,
+	) -> None:
+		self.state = state
+		self.candidates = candidates or []
+		self.stored = dict(stored or {})
+		self.applied: list[dict[str, str]] = []
+		self.revision_bumps: list[str] = []
+
+	async def get_graph_state(self, book_id: str):
+		return self.state
+
+	async def get_entity_candidates(self, book_id: str):
+		return list(self.candidates)
+
+	async def get_resolution(self, book_id: str):
+		return dict(self.stored)
+
+	async def apply_resolution(
+		self, book_id: str, canonical_by_entity, method_by_entity
+	) -> None:
+		self.applied.append(dict(canonical_by_entity))
+
+	async def bump_graph_revision(self, book_id: str) -> int:
+		self.revision_bumps.append(book_id)
+		return 1
+
+
+class ExplodingKnowledgeRepository:
+	async def get_entity_candidates(self, book_id: str):
+		raise RuntimeError("database unavailable")
+
+
+def candidate(entity_id: str, name: str, position: float = 0.0):
+	from core.domain.entities.graph import EntityCandidate
+
+	return EntityCandidate(
+		entity_id=entity_id,
+		name=name,
+		entity_type="character",
+		reading_position=position,
+	)
+
+
+def graph_state(processing_status: str = "ready"):
+	from core.domain.entities.graph import BookGraphState
+
+	return BookGraphState(
+		book_id="book-123",
+		progress_position=0.4,
+		processing_status=processing_status,
+		graph_revision=0,
+	)
+
+
+def run_graph_job(monkeypatch, repository) -> None:
+	monkeypatch.setattr(worker_module, "session_factory", lambda: FakeSessionContext())
+	monkeypatch.setattr(
+		worker_module, "PostgresBookRepository", lambda session: repository
+	)
+	monkeypatch.setattr(
+		worker_module, "PostgresKnowledgeRepository", lambda session: repository
+	)
+	asyncio.run(worker_module.generate_graph({"llm_provider": object()}, "book-123"))
+
+
+def test_graph_job_applies_a_new_resolution_and_bumps_the_revision(monkeypatch) -> None:
+	repository = FakeGraphBookRepository(
+		state=graph_state(),
+		candidates=[candidate("e1", "Alice", 0.1), candidate("e2", "Alice", 0.7)],
+	)
+
+	run_graph_job(monkeypatch, repository)
+
+	assert repository.applied == [{"e1": "e1", "e2": "e1"}]
+	assert repository.revision_bumps == ["book-123"]
+
+
+def test_graph_job_skips_the_revision_when_the_resolution_is_unchanged(monkeypatch) -> None:
+	repository = FakeGraphBookRepository(
+		state=graph_state(),
+		candidates=[candidate("e1", "Alice", 0.1)],
+		stored={"e1": ("e1", "deterministic")},
+	)
+
+	run_graph_job(monkeypatch, repository)
+
+	assert repository.applied == []
+	assert repository.revision_bumps == []
+
+
+def test_graph_job_skips_a_book_that_is_not_ready(monkeypatch) -> None:
+	repository = FakeGraphBookRepository(
+		state=graph_state(processing_status="processing"),
+		candidates=[candidate("e1", "Alice", 0.1)],
+	)
+
+	run_graph_job(monkeypatch, repository)
+
+	assert repository.applied == []
+	assert repository.revision_bumps == []
+
+
+def test_graph_job_skips_an_unknown_book(monkeypatch) -> None:
+	repository = FakeGraphBookRepository(state=None, candidates=[candidate("e1", "Alice")])
+
+	run_graph_job(monkeypatch, repository)
+
+	assert repository.applied == []
+	assert repository.revision_bumps == []
+
+
+def test_graph_job_skips_a_book_without_mentions(monkeypatch) -> None:
+	repository = FakeGraphBookRepository(state=graph_state(), candidates=[])
+
+	run_graph_job(monkeypatch, repository)
+
+	assert repository.applied == []
+	assert repository.revision_bumps == []
+
+
+def test_graph_job_swallows_a_resolution_failure_without_raising(monkeypatch) -> None:
+	monkeypatch.setattr(worker_module, "session_factory", lambda: FakeSessionContext())
+	monkeypatch.setattr(
+		worker_module, "PostgresBookRepository", lambda session: FakeGraphBookRepository(state=graph_state())
+	)
+	monkeypatch.setattr(
+		worker_module, "PostgresKnowledgeRepository", lambda session: ExplodingKnowledgeRepository()
+	)
+
+	asyncio.run(worker_module.generate_graph({"llm_provider": object()}, "book-123"))

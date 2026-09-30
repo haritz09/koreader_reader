@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     max_ebook_size_bytes: int = 10 * 1024 * 1024
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
+    llm_base_url: str = "https://api.openai.com/v1"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

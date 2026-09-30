@@ -1,1 +1,0 @@
-"""Anti-spoiler chat endpoints."""

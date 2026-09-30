@@ -1,8 +1,9 @@
 """Book repository implementation for postgres."""
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.domain.entities.graph import BookGraphState
 from db.models.book import Book
 from db.models.knowledge import ChapterRecord, ChunkRecord
 
@@ -115,3 +116,33 @@ class PostgresBookRepository:
 			.order_by(ChunkRecord.chunk_index)
 		)
 		return result.all()
+
+	async def get_graph_state(self, book_id: str) -> BookGraphState | None:
+		result = await self._session.execute(
+			select(
+				Book.id,
+				Book.progress_position,
+				Book.processing_status,
+				Book.graph_revision,
+			).where(Book.id == book_id)
+		)
+		row = result.one_or_none()
+		if row is None:
+			return None
+		return BookGraphState(
+			book_id=row[0],
+			progress_position=row[1],
+			processing_status=row[2],
+			graph_revision=row[3] or 0,
+		)
+
+	async def bump_graph_revision(self, book_id: str) -> int:
+		result = await self._session.execute(
+			update(Book)
+			.where(Book.id == book_id)
+			.values(graph_revision=Book.graph_revision + 1)
+			.returning(Book.graph_revision)
+		)
+		revision = result.scalar_one_or_none()
+		await self._session.commit()
+		return revision or 0
