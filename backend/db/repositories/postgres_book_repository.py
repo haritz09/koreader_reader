@@ -5,7 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.entities.graph import BookGraphState
 from db.models.book import Book
-from db.models.knowledge import ChapterRecord, ChunkRecord
+from db.models.chapter import ChapterRecord
+from db.models.chunk import ChunkRecord
 
 
 class PostgresBookRepository:

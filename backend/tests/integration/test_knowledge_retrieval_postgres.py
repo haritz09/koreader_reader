@@ -14,7 +14,8 @@ from core.domain.entities.knowledge import (
 )
 from core.services.knowledge_extraction import KnowledgeExtractionService
 from db.models.book import Book
-from db.models.knowledge import ChapterRecord, ChunkRecord
+from db.models.chapter import ChapterRecord
+from db.models.chunk import ChunkRecord
 from db.repositories.knowledge_repository import PostgresKnowledgeRepository
 from db.session import engine, session_factory
 

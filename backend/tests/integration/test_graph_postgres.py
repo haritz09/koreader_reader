@@ -17,7 +17,9 @@ from core.domain.value_objects.reading_position import InvalidReadingPositionErr
 from core.services.entity_resolution import DETERMINISTIC, EntityResolutionService
 from core.services.graph_assembly import GraphAssemblyService
 from db.models.book import Book
-from db.models.knowledge import ChapterRecord, ChunkRecord, EntityRecord, FactRecord
+from db.models.chapter import ChapterRecord
+from db.models.chunk import ChunkRecord
+from db.models.knowledge import EntityRecord, FactRecord
 from db.repositories.knowledge_repository import PostgresKnowledgeRepository
 from db.repositories.postgres_book_repository import PostgresBookRepository
 from db.repositories.postgres_graph_repository import PostgresGraphRepository
