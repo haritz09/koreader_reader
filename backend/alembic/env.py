@@ -4,7 +4,9 @@ from sqlalchemy import engine_from_config, pool
 from core.config import settings
 from db.base import Base
 from db.models.book import Book
-from db.models.knowledge import ChapterRecord, ChunkRecord
+from db.models.chapter import ChapterRecord
+from db.models.chunk import ChunkRecord
+from db.models.knowledge import EntityRecord, EventRecord, FactRecord, LocationRecord
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

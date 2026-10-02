@@ -1,8 +1,11 @@
 """Knowledge and spoiler-filtered retrieval repository."""
 
-from sqlalchemy import select
+from collections.abc import Mapping
+
+from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.domain.entities.graph import EntityCandidate
 from core.domain.entities.knowledge import (
     Entity,
     Event,
@@ -10,6 +13,7 @@ from core.domain.entities.knowledge import (
     KnowledgeExtractionResult,
     Location,
 )
+from core.domain.value_objects.reading_position import validate_reading_position
 from db.models.knowledge import EntityRecord, EventRecord, FactRecord, LocationRecord
 
 
@@ -76,7 +80,7 @@ class PostgresKnowledgeRepository:
         result = await self._session.execute(
             select(EntityRecord)
             .where(EntityRecord.book_id == book_id)
-            .where(EntityRecord.reading_position <= reading_position)
+            .where(EntityRecord.reading_position <= validate_reading_position(reading_position))
             .order_by(EntityRecord.reading_position)
         )
         return [
@@ -99,7 +103,7 @@ class PostgresKnowledgeRepository:
         result = await self._session.execute(
             select(FactRecord)
             .where(FactRecord.book_id == book_id)
-            .where(FactRecord.reading_position <= reading_position)
+            .where(FactRecord.reading_position <= validate_reading_position(reading_position))
             .order_by(FactRecord.reading_position)
         )
         return [
@@ -123,7 +127,7 @@ class PostgresKnowledgeRepository:
         result = await self._session.execute(
             select(EventRecord)
             .where(EventRecord.book_id == book_id)
-            .where(EventRecord.reading_position <= reading_position)
+            .where(EventRecord.reading_position <= validate_reading_position(reading_position))
             .order_by(EventRecord.reading_position)
         )
         return [
@@ -145,7 +149,7 @@ class PostgresKnowledgeRepository:
         result = await self._session.execute(
             select(LocationRecord)
             .where(LocationRecord.book_id == book_id)
-            .where(LocationRecord.reading_position <= reading_position)
+            .where(LocationRecord.reading_position <= validate_reading_position(reading_position))
             .order_by(LocationRecord.reading_position)
         )
         return [
@@ -159,6 +163,72 @@ class PostgresKnowledgeRepository:
             )
             for r in result.scalars()
         ]
+
+    async def get_entity_candidates(self, book_id: str) -> list[EntityCandidate]:
+        """Return every mention for identity grouping.
+
+        Intentionally unfiltered: the mapping is a position-independent pointer
+        to a canonical row, never a label, so resolving ahead of the reader
+        cannot disclose anything. Labels are derived from visible mentions in
+        the graph assembly service.
+        """
+        result = await self._session.execute(
+            select(
+                EntityRecord.id,
+                EntityRecord.name,
+                EntityRecord.entity_type,
+                EntityRecord.reading_position,
+            )
+            .where(EntityRecord.book_id == book_id)
+            .order_by(EntityRecord.reading_position, EntityRecord.id)
+        )
+        return [
+            EntityCandidate(
+                entity_id=record_id,
+                name=name,
+                entity_type=entity_type,
+                reading_position=reading_position,
+            )
+            for record_id, name, entity_type, reading_position in result.all()
+        ]
+
+    async def get_resolution(
+        self, book_id: str
+    ) -> Mapping[str, tuple[str | None, str | None]]:
+        result = await self._session.execute(
+            select(
+                EntityRecord.id,
+                EntityRecord.canonical_id,
+                EntityRecord.resolution_method,
+            ).where(EntityRecord.book_id == book_id)
+        )
+        return {record_id: (canonical_id, method) for record_id, canonical_id, method in result.all()}
+
+    async def apply_resolution(
+        self,
+        book_id: str,
+        canonical_by_entity: Mapping[str, str],
+        method_by_entity: Mapping[str, str],
+    ) -> None:
+        if not canonical_by_entity:
+            return
+        entity_ids = list(canonical_by_entity)
+        await self._session.execute(
+            update(EntityRecord)
+            .where(EntityRecord.book_id == book_id)
+            .where(EntityRecord.id.in_(entity_ids))
+            .values(
+                canonical_id=case(
+                    dict(canonical_by_entity),
+                    value=EntityRecord.id,
+                ),
+                resolution_method=case(
+                    {entity_id: method_by_entity.get(entity_id) for entity_id in entity_ids},
+                    value=EntityRecord.id,
+                ),
+            )
+        )
+        await self._session.commit()
 
     async def delete_by_book(self, book_id: str) -> None:
         await self._session.execute(

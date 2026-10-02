@@ -17,3 +17,5 @@ class KoreaderSyncResponse(BaseModel):
 	position: float
 	device: str
 	accepted: bool = True
+	graph_revision: int = Field(ge=0)
+	graph_generation_queued: bool

@@ -2,6 +2,7 @@ from typing import Any, Protocol
 
 from core.domain.entities.chapter import Chapter
 from core.domain.entities.chunk import Chunk
+from core.domain.entities.graph import BookGraphState
 
 
 class BookRepository(Protocol):
@@ -43,4 +44,10 @@ class BookRepository(Protocol):
         ...
 
     async def get_chunk_ids_by_book(self, book_id: str) -> list[tuple[str, int]]:
+        ...
+
+    async def get_graph_state(self, book_id: str) -> BookGraphState | None:
+        ...
+
+    async def bump_graph_revision(self, book_id: str) -> int:
         ...

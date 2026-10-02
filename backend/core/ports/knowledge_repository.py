@@ -1,7 +1,9 @@
 """Knowledge repository port for spoiler-filtered retrieval."""
 
+from collections.abc import Mapping
 from typing import Protocol
 
+from core.domain.entities.graph import EntityCandidate
 from core.domain.entities.knowledge import (
     Entity,
     Event,
@@ -41,5 +43,18 @@ class KnowledgeRepository(Protocol):
         book_id: str,
         reading_position: float,
     ) -> list[Location]: ...
+
+    async def get_entity_candidates(self, book_id: str) -> list[EntityCandidate]: ...
+
+    async def get_resolution(
+        self, book_id: str
+    ) -> Mapping[str, tuple[str | None, str | None]]: ...
+
+    async def apply_resolution(
+        self,
+        book_id: str,
+        canonical_by_entity: Mapping[str, str],
+        method_by_entity: Mapping[str, str],
+    ) -> None: ...
 
     async def delete_by_book(self, book_id: str) -> None: ...
