@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from core.domain.entities.graph import EntityMention, FactLink
+from core.domain.entities.knowledge import EVENT_NODE_TYPE, LOCATION_NODE_TYPE
 from core.domain.value_objects.reading_position import InvalidReadingPositionError
 from core.services.graph_assembly import GraphAssemblyService
 
@@ -43,6 +44,9 @@ def mention(
     position: float,
     canonical_id: str | None = None,
     entity_type: str = "character",
+    description: str = "",
+    sub_type: str | None = None,
+    aliases: tuple[str, ...] = (),
 ) -> EntityMention:
     return EntityMention(
         entity_id=entity_id,
@@ -50,6 +54,9 @@ def mention(
         name=name,
         entity_type=entity_type,
         reading_position=position,
+        description=description,
+        sub_type=sub_type,
+        aliases=aliases,
     )
 
 
@@ -174,7 +181,7 @@ def test_an_edge_is_dropped_when_its_target_is_not_yet_visible() -> None:
     assert graph.edges == ()
 
 
-def test_an_edge_is_dropped_when_its_target_appears_after_the_fact() -> None:
+def test_an_edge_appears_once_its_target_has_been_read() -> None:
     graph = build(
         [mention("e1", "Alice", 0.1), mention("e2", "Bob", 0.7)],
         [fact("f1", "Alice", "Bob", 0.3)],
@@ -198,14 +205,30 @@ def test_an_edge_is_dropped_when_a_name_is_ambiguous_among_visible_nodes() -> No
     graph = build(
         [
             mention("e1", "Alice", 0.1, entity_type="character"),
-            mention("e2", "Alice", 0.2, entity_type="place"),
-            mention("e3", "Bob", 0.3),
+            mention("l1", "Alice", 0.2, entity_type=LOCATION_NODE_TYPE),
+            mention("e2", "Bob", 0.3),
         ],
         [fact("f1", "Alice", "Bob", 0.4)],
         1.0,
     )
 
     assert graph.edges == ()
+
+
+def test_a_place_and_a_person_sharing_a_name_stay_separate_nodes() -> None:
+    graph = build(
+        [
+            mention("e1", "Alice", 0.1, entity_type="character"),
+            mention("l1", "Alice", 0.2, entity_type=LOCATION_NODE_TYPE),
+        ],
+        [],
+        1.0,
+    )
+
+    assert [(node.node_id, node.node_type) for node in graph.nodes] == [
+        ("e1", "character"),
+        ("l1", LOCATION_NODE_TYPE),
+    ]
 
 
 def test_a_single_sided_fact_produces_no_edge() -> None:
@@ -267,3 +290,159 @@ def test_an_out_of_range_position_fails_closed(position: float) -> None:
 
     with pytest.raises(InvalidReadingPositionError):
         asyncio.run(GraphAssemblyService(repository).build("book-1", position))
+
+
+def test_a_place_is_a_first_class_node_of_type_location() -> None:
+    graph = build(
+        [mention("l1", "Luthadel", 0.1, entity_type=LOCATION_NODE_TYPE)],
+        [],
+        1.0,
+    )
+
+    node = graph.nodes[0]
+    assert node.node_type == LOCATION_NODE_TYPE
+    assert node.label == "Luthadel"
+    assert node.node_id == "l1"
+
+
+def test_repeated_mentions_of_a_place_merge_into_one_node_by_name() -> None:
+    graph = build(
+        [
+            mention("l2", "Capital", 0.7, entity_type=LOCATION_NODE_TYPE),
+            mention("l1", "capital.", 0.2, entity_type=LOCATION_NODE_TYPE),
+        ],
+        [],
+        1.0,
+    )
+
+    assert len(graph.nodes) == 1
+    assert graph.nodes[0].node_id == "l1"
+    assert graph.nodes[0].first_seen_position == 0.2
+    assert graph.nodes[0].mention_count == 2
+
+
+def test_an_event_is_a_first_class_node_of_type_event() -> None:
+    graph = build(
+        [
+            mention(
+                "ev1",
+                "The Siege of Luthadel",
+                0.4,
+                entity_type=EVENT_NODE_TYPE,
+                description="The city walls were breached at dawn.",
+            ),
+        ],
+        [],
+        1.0,
+    )
+
+    node = graph.nodes[0]
+    assert node.node_type == EVENT_NODE_TYPE
+    assert node.node_id == "ev1"
+    assert node.description == "The city walls were breached at dawn."
+
+
+def test_a_place_and_an_event_with_the_same_name_stay_separate_nodes() -> None:
+    graph = build(
+        [
+            mention("l1", "Luthadel", 0.1, entity_type=LOCATION_NODE_TYPE),
+            mention("ev1", "Luthadel", 0.2, entity_type=EVENT_NODE_TYPE),
+        ],
+        [],
+        1.0,
+    )
+
+    assert sorted(node.node_type for node in graph.nodes) == [
+        EVENT_NODE_TYPE,
+        LOCATION_NODE_TYPE,
+    ]
+
+
+def test_an_event_can_be_the_endpoint_of_an_edge() -> None:
+    graph = build(
+        [
+            mention("e1", "Vin", 0.1),
+            mention("ev1", "The Siege", 0.2, entity_type=EVENT_NODE_TYPE),
+        ],
+        [fact("f1", "Vin", "The Siege", 0.3)],
+        1.0,
+    )
+
+    assert [(edge.source_id, edge.target_id) for edge in graph.edges] == [
+        ("e1", "ev1")
+    ]
+
+
+def test_a_node_description_comes_from_earliest_visible_mention() -> None:
+    graph = build(
+        [
+            mention("e1", "Vin", 0.1, canonical_id="e1", description="A street urchin."),
+            mention("e2", "Vin", 0.9, canonical_id="e1", description="The Last Emperor."),
+        ],
+        [],
+        1.0,
+    )
+
+    assert graph.nodes[0].description == "A street urchin."
+
+
+def test_a_later_description_cannot_describe_a_node_the_reader_has_not_reached() -> None:
+    mentions = [
+        mention("e1", "Vin", 0.1, canonical_id="e1"),
+        mention("e2", "Vin", 0.9, canonical_id="e1", description="The Last Emperor."),
+    ]
+
+    assert build(mentions, [], 0.5).nodes[0].description == ""
+    assert build(mentions, [], 1.0).nodes[0].description == "The Last Emperor."
+
+
+def test_a_node_sub_type_comes_from_earliest_visible_mention() -> None:
+    graph = build(
+        [
+            mention("e1", "Vin", 0.1, canonical_id="e1", sub_type=None),
+            mention("e2", "Vin", 0.3, canonical_id="e1", sub_type="mistborn"),
+            mention("e3", "Vin", 0.8, canonical_id="e1", sub_type="emperor"),
+        ],
+        [],
+        1.0,
+    )
+
+    assert graph.nodes[0].sub_type == "mistborn"
+
+
+def test_aliases_are_the_other_visible_names_without_repeating_the_label() -> None:
+    graph = build(
+        [
+            mention("e1", "Vin", 0.1, canonical_id="e1"),
+            mention("e2", "Vine", 0.2, canonical_id="e1"),
+            mention("e3", "vin", 0.3, canonical_id="e1"),
+            mention("e4", "The Last Emperor", 0.4, canonical_id="e1", aliases=("Reen's sister",)),
+        ],
+        [],
+        1.0,
+    )
+
+    assert graph.nodes[0].aliases == ("Vine", "The Last Emperor", "Reen's sister")
+
+
+def test_a_later_alias_cannot_reach_a_reader_at_an_earlier_position() -> None:
+    mentions = [
+        mention("e1", "Vin", 0.1, canonical_id="e1"),
+        mention("e2", "The Last Emperor", 0.9, canonical_id="e1"),
+    ]
+
+    assert build(mentions, [], 0.5).nodes[0].aliases == ()
+    assert build(mentions, [], 1.0).nodes[0].aliases == ("The Last Emperor",)
+
+
+def test_entity_nodes_carry_no_alias_that_is_only_another_mention_of_the_name() -> None:
+    graph = build(
+        [
+            mention("e1", "Luthadel", 0.1, canonical_id="e1"),
+            mention("e2", "Luthadel", 0.2, canonical_id="e1"),
+        ],
+        [],
+        1.0,
+    )
+
+    assert graph.nodes[0].aliases == ()

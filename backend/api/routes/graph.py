@@ -40,6 +40,9 @@ async def get_book_graph(
 				node_type=node.node_type,
 				first_seen_position=node.first_seen_position,
 				mention_count=node.mention_count,
+				description=node.description,
+				sub_type=node.sub_type,
+				aliases=list(node.aliases),
 			)
 			for node in graph.nodes
 		],

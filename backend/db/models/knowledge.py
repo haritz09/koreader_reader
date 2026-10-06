@@ -7,6 +7,7 @@ spine they attach to lives in ``chapter.py`` and ``chunk.py``.
 import uuid
 
 from sqlalchemy import (
+	ARRAY,
 	CheckConstraint,
 	Float,
 	ForeignKey,
@@ -20,6 +21,9 @@ from db.base import Base
 
 READING_POSITION_CHECK = "reading_position >= 0.0 AND reading_position <= 1.0"
 
+ENTITY_TYPE_VALUES = "'character', 'enemy', 'artifact', 'organization', 'concept', 'other'"
+ENTITY_TYPE_CHECK = f"entity_type IN ({ENTITY_TYPE_VALUES})"
+
 
 class EntityRecord(Base):
 	__tablename__ = "entities"
@@ -27,6 +31,7 @@ class EntityRecord(Base):
 		Index("ix_entities_book_reading_position", "book_id", "reading_position"),
 		Index("ix_entities_book_canonical_id", "book_id", "canonical_id"),
 		CheckConstraint(READING_POSITION_CHECK, name="ck_entities_reading_position"),
+		CheckConstraint(ENTITY_TYPE_CHECK, name="ck_entities_entity_type"),
 	)
 
 	id: Mapped[str] = mapped_column(String(255), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -34,6 +39,11 @@ class EntityRecord(Base):
 	chunk_id: Mapped[str] = mapped_column(ForeignKey("chunks.id"), nullable=False)
 	name: Mapped[str] = mapped_column(String(500), nullable=False)
 	entity_type: Mapped[str] = mapped_column(String(100), nullable=False)
+	description: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+	sub_type: Mapped[str | None] = mapped_column(String(100))
+	aliases: Mapped[list[str]] = mapped_column(
+		ARRAY(String(500)), nullable=False, default=list, server_default="{}"
+	)
 	reading_position: Mapped[float] = mapped_column(Float, nullable=False)
 	canonical_id: Mapped[str | None] = mapped_column(ForeignKey("entities.id"))
 	resolution_method: Mapped[str | None] = mapped_column(String(32))
@@ -65,6 +75,9 @@ class EventRecord(Base):
 	id: Mapped[str] = mapped_column(String(255), primary_key=True, default=lambda: str(uuid.uuid4()))
 	book_id: Mapped[str] = mapped_column(ForeignKey("books.id"), nullable=False)
 	chunk_id: Mapped[str] = mapped_column(ForeignKey("chunks.id"), nullable=False)
+	name: Mapped[str] = mapped_column(
+		String(500), nullable=False, default="", server_default=""
+	)
 	description: Mapped[str] = mapped_column(Text, nullable=False)
 	reading_position: Mapped[float] = mapped_column(Float, nullable=False)
 

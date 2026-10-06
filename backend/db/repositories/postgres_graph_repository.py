@@ -1,18 +1,19 @@
 """Graph repository implementation for postgres.
 
-This is the anti-spoiler boundary for the graph read path. Both queries apply
-``reading_position <= reading_position`` before any row is returned, and the
-position is validated so an out-of-range value cannot widen the result to the
-whole book.
+Anti-spoiler boundary for the graph read path: every query filters
+``reading_position <= position`` and validates the position first, so an
+out-of-range value cannot widen the result to the whole book. Places and
+events live in their own tables and are read through the same filter.
 """
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.entities.graph import EntityMention, FactLink
+from core.domain.entities.knowledge import EVENT_NODE_TYPE, LOCATION_NODE_TYPE
 from core.domain.value_objects.reading_position import validate_reading_position
 from db.models.book import Book
-from db.models.knowledge import EntityRecord, FactRecord
+from db.models.knowledge import EntityRecord, EventRecord, FactRecord, LocationRecord
 
 
 class PostgresGraphRepository:
@@ -25,12 +26,28 @@ class PostgresGraphRepository:
         reading_position: float,
     ) -> list[EntityMention]:
         position = validate_reading_position(reading_position)
+        mentions: list[EntityMention] = await self._entity_mentions(book_id, position)
+        mentions.extend(
+            await self._standalone_mentions(book_id, position, LocationRecord, LOCATION_NODE_TYPE)
+        )
+        mentions.extend(
+            await self._standalone_mentions(book_id, position, EventRecord, EVENT_NODE_TYPE)
+        )
+        mentions.sort(key=lambda mention: (mention.reading_position, mention.entity_id))
+        return mentions
+
+    async def _entity_mentions(
+        self, book_id: str, position: float
+    ) -> list[EntityMention]:
         result = await self._session.execute(
             select(
                 EntityRecord.id,
                 EntityRecord.canonical_id,
                 EntityRecord.name,
                 EntityRecord.entity_type,
+                EntityRecord.description,
+                EntityRecord.sub_type,
+                EntityRecord.aliases,
                 EntityRecord.reading_position,
             )
             .where(EntityRecord.book_id == book_id)
@@ -44,8 +61,46 @@ class PostgresGraphRepository:
                 name=name,
                 entity_type=entity_type,
                 reading_position=mention_position,
+                description=description or "",
+                sub_type=sub_type,
+                aliases=tuple(aliases or ()),
             )
-            for record_id, canonical_id, name, entity_type, mention_position in result.all()
+            for (
+                record_id,
+                canonical_id,
+                name,
+                entity_type,
+                description,
+                sub_type,
+                aliases,
+                mention_position,
+            ) in result.all()
+        ]
+
+    async def _standalone_mentions(
+        self,
+        book_id: str,
+        position: float,
+        table,
+        node_type: str,
+    ) -> list[EntityMention]:
+        """Read places and events, which carry no canonical pointer of their own."""
+        result = await self._session.execute(
+            select(table.id, table.name, table.description, table.reading_position)
+            .where(table.book_id == book_id)
+            .where(table.reading_position <= position)
+            .order_by(table.reading_position, table.id)
+        )
+        return [
+            EntityMention(
+                entity_id=record_id,
+                canonical_id=record_id,
+                name=name,
+                entity_type=node_type,
+                reading_position=mention_position,
+                description=description or "",
+            )
+            for record_id, name, description, mention_position in result.all()
         ]
 
     async def get_visible_facts(
@@ -86,10 +141,8 @@ class PostgresGraphRepository:
         return int(result.scalar_one() or 0)
 
     async def delete_by_book(self, book_id: str) -> None:
-        await self._session.execute(
-            EntityRecord.__table__.delete().where(EntityRecord.book_id == book_id)
-        )
-        await self._session.execute(
-            FactRecord.__table__.delete().where(FactRecord.book_id == book_id)
-        )
+        for table in (EntityRecord, FactRecord, EventRecord, LocationRecord):
+            await self._session.execute(
+                table.__table__.delete().where(table.book_id == book_id)
+            )
         await self._session.commit()

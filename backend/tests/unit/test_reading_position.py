@@ -1,11 +1,9 @@
-import dataclasses
 import math
 
 import pytest
 
 from core.domain.value_objects.reading_position import (
     InvalidReadingPositionError,
-    ReadingPosition,
     validate_reading_position,
 )
 
@@ -42,10 +40,3 @@ def test_an_integer_position_is_accepted_and_narrowed_to_float() -> None:
 
     assert isinstance(value, float)
     assert value == 1.0
-
-
-def test_reading_position_is_immutable() -> None:
-    position = ReadingPosition(0.25)
-
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        position.value = 0.75  # type: ignore[misc]

@@ -15,15 +15,6 @@ async def _real_book_repository() -> AsyncIterator[PostgresBookRepository]:
 
 
 @pytest.fixture
-def app_client() -> Generator[TestClient, None, None]:
-    client = TestClient(app)
-    try:
-        yield client
-    finally:
-        app.dependency_overrides.clear()
-
-
-@pytest.fixture
 def postgres_app_client() -> Generator[TestClient, None, None]:
     app.dependency_overrides[get_book_repository] = _real_book_repository
     client = TestClient(app)

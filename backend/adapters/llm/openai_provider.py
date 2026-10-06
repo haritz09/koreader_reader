@@ -3,6 +3,7 @@
 import json
 import logging
 from collections.abc import Sequence
+from typing import cast
 from uuid import uuid4
 
 import httpx
@@ -10,7 +11,10 @@ import httpx
 from core.config import settings
 from core.domain.entities.graph import EntityCandidate
 from core.domain.entities.knowledge import (
+    ENTITY_TYPES,
+    FALLBACK_ENTITY_TYPE,
     Entity,
+    EntityType,
     Event,
     Fact,
     KnowledgeExtractionResult,
@@ -19,14 +23,30 @@ from core.domain.entities.knowledge import (
 
 logger = logging.getLogger(__name__)
 
+MAX_ALIASES = 8
+
 _SYSTEM_PROMPT = """\
 Given a chunk of text from a book, extract all entities, facts, events, and locations mentioned.
 
 Return a JSON object with four arrays:
-- "entities": objects with "name" and "entity_type" (character, place, concept, organization, other)
+- "entities": objects with "name", "entity_type", optional "description", optional "sub_type", optional "aliases"
 - "facts": objects with "statement", optional "subject", optional "object"
-- "events": objects with "description"
+- "events": objects with "name", "description"
 - "locations": objects with "name", optional "description"
+
+"entity_type" MUST be exactly one of: character, enemy, artifact, organization, concept.
+- character: a good or neutral person
+- enemy: a hostile, villainous, or opposing person
+- artifact: a physical object of significance, such as a weapon, ring, or relic
+- organization: a faction, group, order, or institution
+- concept: a body of knowledge, power system, law, or abstract idea
+
+"sub_type" is an optional narrower kind or trait, such as mistborn, feruchemist, or sword.
+"aliases" is an optional list of other names or titles the same entity is called in
+this passage, copied exactly as written.
+
+An event is a significant occurrence such as a battle. It stands on its own, so give
+it a short "name" and its "description"; do not give it a subject or an object.
 
 Keep statements concise (under 200 words). Return ONLY valid JSON, no markdown.\
 """
@@ -149,24 +169,128 @@ class OpenAIProvider:
             logger.warning("LLM returned invalid JSON: %s", content[:200])
             return KnowledgeExtractionResult(entities=[], facts=[], events=[], locations=[])
 
-        def _uid() -> str: 
-            return str(uuid4())
+        if not isinstance(data, dict):
+            logger.warning("LLM returned a non-object JSON payload: %s", content[:200])
+            return KnowledgeExtractionResult(entities=[], facts=[], events=[], locations=[])
 
-        entities = [
-            Entity(entity_id=_uid(), book_id="", chunk_id="", name=e["name"], entity_type=e.get("entity_type", "other"), reading_position=0.0)
-            for e in data.get("entities", [])
-        ]
-        facts = [
-            Fact(fact_id=_uid(), book_id="", chunk_id="", statement=f["statement"], subject=f.get("subject"), object=f.get("object"), reading_position=0.0)
-            for f in data.get("facts", [])
-        ]
-        events = [
-            Event(event_id=_uid(), book_id="", chunk_id="", description=ev["description"], reading_position=0.0)
-            for ev in data.get("events", [])
-        ]
-        locations = [
-            Location(location_id=_uid(), book_id="", chunk_id="", name=loc["name"], description=loc.get("description"), reading_position=0.0)
-            for loc in data.get("locations", [])
-        ]
+        entities: list[Entity] = []
+        for raw in _list_of(data.get("entities")):
+            name = _text(raw.get("name"))
+            if not name:
+                continue
+            entities.append(
+                Entity(
+                    entity_id=_uid(),
+                    book_id="",
+                    chunk_id="",
+                    name=name,
+                    entity_type=_entity_type(raw.get("entity_type")),
+                    reading_position=0.0,
+                    description=_text(raw.get("description")),
+                    sub_type=_text(raw.get("sub_type")) or None,
+                    aliases=_aliases(raw.get("aliases"), name),
+                )
+            )
+
+        facts: list[Fact] = []
+        for raw in _list_of(data.get("facts")):
+            statement = _text(raw.get("statement"))
+            if not statement:
+                continue
+            facts.append(
+                Fact(
+                    fact_id=_uid(),
+                    book_id="",
+                    chunk_id="",
+                    statement=statement,
+                    subject=_optional_text(raw.get("subject")),
+                    object=_optional_text(raw.get("object")),
+                    reading_position=0.0,
+                )
+            )
+
+        events: list[Event] = []
+        for raw in _list_of(data.get("events")):
+            name = _text(raw.get("name"))
+            if not name:
+                logger.warning("LLM returned an event without a name, skipping it")
+                continue
+            events.append(
+                Event(
+                    event_id=_uid(),
+                    book_id="",
+                    chunk_id="",
+                    description=_text(raw.get("description")),
+                    reading_position=0.0,
+                    name=name,
+                )
+            )
+
+        locations: list[Location] = []
+        for raw in _list_of(data.get("locations")):
+            name = _text(raw.get("name"))
+            if not name:
+                continue
+            locations.append(
+                Location(
+                    location_id=_uid(),
+                    book_id="",
+                    chunk_id="",
+                    name=name,
+                    description=_optional_text(raw.get("description")),
+                    reading_position=0.0,
+                )
+            )
 
         return KnowledgeExtractionResult(entities=entities, facts=facts, events=events, locations=locations)
+
+
+def _uid() -> str:
+    return str(uuid4())
+
+
+def _list_of(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _text(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _optional_text(value: object) -> str | None:
+    return _text(value) or None
+
+
+def _entity_type(value: object) -> EntityType:
+    if isinstance(value, str):
+        candidate = value.strip().casefold()
+        if candidate in ENTITY_TYPES:
+            return cast(EntityType, candidate)
+    logger.warning("LLM returned an unknown entity_type %r, storing %r", value, FALLBACK_ENTITY_TYPE)
+    return FALLBACK_ENTITY_TYPE
+
+
+def _aliases(value: object, name: str) -> tuple[str, ...]:
+    """Keep a short, order-preserving set of aliases that are not the name itself."""
+    if not isinstance(value, list):
+        return ()
+    seen: set[str] = {_key(name)}
+    aliases: list[str] = []
+    for item in value:
+        alias = _text(item)
+        if not alias:
+            continue
+        key = _key(alias)
+        if key in seen:
+            continue
+        seen.add(key)
+        aliases.append(alias)
+        if len(aliases) >= MAX_ALIASES:
+            break
+    return tuple(aliases)
+
+
+def _key(value: str) -> str:
+    return " ".join(value.split()).casefold()

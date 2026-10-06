@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
+MAX_ALIASES = 64
+
 
 class GraphNodeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -11,6 +13,9 @@ class GraphNodeResponse(BaseModel):
     node_type: str
     first_seen_position: float = Field(ge=0.0, le=1.0)
     mention_count: int = Field(ge=1)
+    description: str = ""
+    sub_type: str | None = None
+    aliases: list[str] = Field(default_factory=list, max_length=MAX_ALIASES)
 
 
 class GraphEdgeResponse(BaseModel):

@@ -126,7 +126,7 @@ def test_the_same_name_with_conflicting_types_is_escalated() -> None:
     result, _ = resolve(
         [
             candidate("e1", "Ash", entity_type="character"),
-            candidate("e2", "Ash", entity_type="place"),
+            candidate("e2", "Ash", entity_type="artifact"),
         ],
         resolver=resolver,
     )

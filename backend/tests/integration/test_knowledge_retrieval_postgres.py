@@ -51,6 +51,7 @@ class _ChunkTaggingLLMProvider:
                     event_id="",
                     book_id="",
                     chunk_id="",
+                    name=f"event-{chunk_text}",
                     description=f"event-{chunk_text}",
                     reading_position=0.0,
                 )

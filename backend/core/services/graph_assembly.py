@@ -1,29 +1,28 @@
 """Spoiler-filtered graph assembly.
 
-The repository applies ``reading_position <= reading_position`` so no
-post-position knowledge can reach this service. Assembly then keeps that
-guarantee intact at the shape level, which is where a leak would actually
-happen:
+The repository filters by ``reading_position`` before anything reaches this
+service. Assembly keeps that guarantee at the shape level:
 
-* a node's label and ``first_seen_position`` come from the visible mentions of
-  that node, never from a name stored on the canonical entity. An alias first
-  mentioned at 0.8 therefore cannot label a node a reader sees at 0.3.
-* an edge is emitted only when both of its endpoints resolve to a node that is
-  visible. A fact at 0.2 pointing at a character first seen at 0.7 yields no
-  edge rather than a dangling reference to something the reader cannot see.
-* when a normalized name is ambiguous across visible nodes the edge is dropped
-  instead of guessing which entity was meant.
+* label, description, sub type, aliases, and ``first_seen_position`` come from
+  visible mentions only, so a name or a detail from later in the book cannot
+  describe a node the reader has not reached.
+* an edge is emitted only when both endpoints resolve to a visible node.
+* an ambiguous normalized name drops the edge instead of guessing.
 """
 
 import logging
 from collections.abc import Mapping
 
 from core.domain.entities.graph import BookGraph, EntityMention, FactLink, GraphEdge, GraphNode
+from core.domain.entities.knowledge import EVENT_NODE_TYPE, LOCATION_NODE_TYPE
 from core.domain.value_objects.reading_position import validate_reading_position
 from core.ports.graph_repository import GraphRepository
 from core.services.entity_resolution import normalize_name
 
 logger = logging.getLogger(__name__)
+
+# Places and events have no canonical pointer, so they group by name at read time.
+_NAME_GROUPED_NODE_TYPES = frozenset({LOCATION_NODE_TYPE, EVENT_NODE_TYPE})
 
 
 class GraphAssemblyService:
@@ -47,33 +46,63 @@ class GraphAssemblyService:
         )
 
 
+def _group_key(mention: EntityMention) -> tuple[str, str]:
+    """Group entities by resolved identity, places and events by their name."""
+    if mention.entity_type in _NAME_GROUPED_NODE_TYPES:
+        return (mention.entity_type, normalize_name(mention.name))
+    return ("entity", mention.canonical_id)
+
+
+def _detail_of(
+    ordered: list[EntityMention],
+) -> tuple[str, str | None, tuple[str, ...]]:
+    """Derive description, sub type, and aliases from visible mentions only."""
+    description = next((m.description for m in ordered if m.description), "")
+    sub_type = next((m.sub_type for m in ordered if m.sub_type), None)
+
+    aliases: list[str] = []
+    seen = {normalize_name(ordered[0].name)}
+    for mention in ordered:
+        for candidate in (mention.name, *mention.aliases):
+            key = normalize_name(candidate)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            aliases.append(candidate)
+    return description, sub_type, tuple(aliases)
+
+
 def _build_nodes(
     mentions: list[EntityMention],
 ) -> tuple[list[GraphNode], dict[str, str | None]]:
     """Group visible mentions into nodes and index their names for edge lookup."""
-    grouped: dict[str, list[EntityMention]] = {}
+    grouped: dict[tuple[str, str], list[EntityMention]] = {}
     for mention in mentions:
-        grouped.setdefault(mention.canonical_id, []).append(mention)
+        grouped.setdefault(_group_key(mention), []).append(mention)
 
     nodes: list[GraphNode] = []
     name_index: dict[str, str | None] = {}
-    for canonical_id, group in grouped.items():
+    for group in grouped.values():
         ordered = sorted(group, key=lambda m: (m.reading_position, m.entity_id))
         earliest = ordered[0]
+        description, sub_type, aliases = _detail_of(ordered)
         nodes.append(
             GraphNode(
-                node_id=canonical_id,
+                node_id=earliest.canonical_id,
                 label=earliest.name,
                 node_type=earliest.entity_type,
                 first_seen_position=earliest.reading_position,
                 mention_count=len(ordered),
+                description=description,
+                sub_type=sub_type,
+                aliases=aliases,
             )
         )
         key = normalize_name(earliest.name)
         if key in name_index:
             name_index[key] = None
         else:
-            name_index[key] = canonical_id
+            name_index[key] = earliest.canonical_id
 
     nodes.sort(key=lambda node: (node.first_seen_position, node.node_id))
     return nodes, name_index
@@ -85,10 +114,8 @@ def _build_edges(
 ) -> list[GraphEdge]:
     """Turn facts into edges between visible nodes.
 
-    Facts whose subject or object is missing, unresolvable, or ambiguous among
-    visible nodes are skipped. A single-sided fact is not representable as an
-    edge between two entities, so it is dropped rather than anchored to a
-    placeholder node.
+    Facts with a missing, unresolvable, ambiguous, or self-referential endpoint
+    are dropped rather than anchored to a placeholder node.
     """
     edges: list[GraphEdge] = []
     seen: set[tuple[str, str, str]] = set()

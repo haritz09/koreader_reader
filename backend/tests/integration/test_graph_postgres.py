@@ -13,13 +13,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.entities.graph import EntityCandidate
+from core.domain.entities.knowledge import ENTITY_TYPES
 from core.domain.value_objects.reading_position import InvalidReadingPositionError
 from core.services.entity_resolution import DETERMINISTIC, EntityResolutionService
 from core.services.graph_assembly import GraphAssemblyService
 from db.models.book import Book
 from db.models.chapter import ChapterRecord
 from db.models.chunk import ChunkRecord
-from db.models.knowledge import EntityRecord, FactRecord
+from db.models.knowledge import EntityRecord, EventRecord, FactRecord, LocationRecord
 from db.repositories.knowledge_repository import PostgresKnowledgeRepository
 from db.repositories.postgres_book_repository import PostgresBookRepository
 from db.repositories.postgres_graph_repository import PostgresGraphRepository
@@ -116,6 +117,33 @@ async def _add_entities(
     await session.commit()
 
 
+async def _add_entity_details(
+    session: AsyncSession,
+    book_id: str,
+    chunk_ids: dict[int, str],
+    rows: Sequence[tuple[int, str, str, str, str | None, Sequence[str]]],
+) -> None:
+    """Insert mentions carrying detail.
+
+    Rows are (chunk index, entity id, name, description, sub type, aliases).
+    """
+    for index, entity_id, name, description, sub_type, aliases in rows:
+        session.add(
+            EntityRecord(
+                id=entity_id,
+                book_id=book_id,
+                chunk_id=chunk_ids[index],
+                name=name,
+                entity_type="character",
+                reading_position=_position_for(book_id, index),
+                description=description,
+                sub_type=sub_type,
+                aliases=list(aliases),
+            )
+        )
+    await session.commit()
+
+
 async def _add_facts(
     session: AsyncSession,
     book_id: str,
@@ -132,6 +160,48 @@ async def _add_facts(
                 statement=statement,
                 subject=subject,
                 object=object_,
+                reading_position=_position_for(book_id, index),
+            )
+        )
+    await session.commit()
+
+
+async def _add_locations(
+    session: AsyncSession,
+    book_id: str,
+    chunk_ids: dict[int, str],
+    rows: Sequence[tuple[int, str, str, str]],
+) -> None:
+    """Insert places as (chunk index, location id, name, description)."""
+    for index, location_id, name, description in rows:
+        session.add(
+            LocationRecord(
+                id=location_id,
+                book_id=book_id,
+                chunk_id=chunk_ids[index],
+                name=name,
+                description=description,
+                reading_position=_position_for(book_id, index),
+            )
+        )
+    await session.commit()
+
+
+async def _add_events(
+    session: AsyncSession,
+    book_id: str,
+    chunk_ids: dict[int, str],
+    rows: Sequence[tuple[int, str, str, str]],
+) -> None:
+    """Insert events as (chunk index, event id, name, description)."""
+    for index, event_id, name, description in rows:
+        session.add(
+            EventRecord(
+                id=event_id,
+                book_id=book_id,
+                chunk_id=chunk_ids[index],
+                name=name,
+                description=description,
                 reading_position=_position_for(book_id, index),
             )
         )
@@ -532,5 +602,242 @@ def test_resolution_survives_being_applied_twice(clean_postgres_database: None) 
             "book-a-e2": ("book-a-e1", DETERMINISTIC),
         }
         assert second.changed is False
+
+    _run_against_postgres(work)
+
+
+def test_places_and_events_reach_the_graph_as_their_own_node_types(
+    clean_postgres_database: None,
+) -> None:
+    async def work(session: AsyncSession) -> None:
+        chunk_ids = await _seed_book(session, "book-a", _POSITIONS)
+        await _add_locations(
+            session,
+            "book-a",
+            chunk_ids,
+            [(0, "book-a-l1", "Luthadel", "The city of the Final Empire")],
+        )
+        await _add_events(
+            session,
+            "book-a",
+            chunk_ids,
+            [(1, "book-a-ev1", "The Siege of Luthadel", "The walls were breached")],
+        )
+
+        graph = await _build_graph(session, "book-a", 1.0)
+
+        assert {
+            (node.node_id, node.node_type) for node in graph.nodes
+        } == {
+            ("book-a-l1", "location"),
+            ("book-a-ev1", "event"),
+        }
+        assert graph.nodes[0].label == "Luthadel"
+        assert graph.nodes[0].description == "The city of the Final Empire"
+        assert graph.nodes[1].label == "The Siege of Luthadel"
+        assert graph.nodes[1].description == "The walls were breached"
+
+    _run_against_postgres(work)
+
+
+def test_places_and_events_are_hidden_beyond_the_requested_position(
+    clean_postgres_database: None,
+) -> None:
+    async def work(session: AsyncSession) -> None:
+        chunk_ids = await _seed_book(session, "book-a", _POSITIONS)
+        await _add_locations(
+            session,
+            "book-a",
+            chunk_ids,
+            [(0, "book-a-l1", "Luthadel", "seen early"), (2, "book-a-l2", "Kredik Shaw", "seen late")],
+        )
+        await _add_events(
+            session,
+            "book-a",
+            chunk_ids,
+            [(1, "book-a-ev1", "The Siege", "seen early"), (2, "book-a-ev2", "The Fall", "seen late")],
+        )
+
+        early = await _build_graph(session, "book-a", 0.5)
+        late = await _build_graph(session, "book-a", 1.0)
+
+        assert [node.label for node in early.nodes] == ["Luthadel", "The Siege"]
+        assert len(late.nodes) == 4
+
+    _run_against_postgres(work)
+
+
+def test_repeated_mentions_of_a_place_merge_into_one_node(
+    clean_postgres_database: None,
+) -> None:
+    async def work(session: AsyncSession) -> None:
+        chunk_ids = await _seed_book(session, "book-a", _POSITIONS)
+        await _add_locations(
+            session,
+            "book-a",
+            chunk_ids,
+            [
+                (0, "book-a-l1", "Luthadel", "early mention"),
+                (2, "book-a-l2", "luthadel.", "late mention"),
+            ],
+        )
+
+        graph = await _build_graph(session, "book-a", 1.0)
+
+        assert len(graph.nodes) == 1
+        assert graph.nodes[0].node_id == "book-a-l1"
+        assert graph.nodes[0].first_seen_position == 0.0
+        assert graph.nodes[0].mention_count == 2
+        assert graph.nodes[0].description == "early mention"
+
+    _run_against_postgres(work)
+
+
+def test_an_event_can_be_one_endpoint_of_an_edge(clean_postgres_database: None) -> None:
+    async def work(session: AsyncSession) -> None:
+        chunk_ids = await _seed_book(session, "book-a", _POSITIONS)
+        await _add_entities(
+            session,
+            "book-a",
+            chunk_ids,
+            [(0, "book-a-e1", "Vin", "character")],
+        )
+        await _add_events(
+            session,
+            "book-a",
+            chunk_ids,
+            [(1, "book-a-ev1", "The Siege", "The walls were breached")],
+        )
+        await _add_facts(
+            session,
+            "book-a",
+            chunk_ids,
+            [(2, "book-a-f1", "Vin", "The Siege", "Vin led the assault")],
+        )
+
+        graph = await _build_graph(session, "book-a", 1.0)
+
+        assert [(edge.source_id, edge.target_id) for edge in graph.edges] == [
+            ("book-a-e1", "book-a-ev1")
+        ]
+
+    _run_against_postgres(work)
+
+
+def test_entity_detail_columns_reach_the_graph_at_the_right_position(
+    clean_postgres_database: None,
+) -> None:
+    async def work(session: AsyncSession) -> None:
+        chunk_ids = await _seed_book(session, "book-a", _POSITIONS)
+        await _add_entity_details(
+            session,
+            "book-a",
+            chunk_ids,
+            [
+                (0, "book-a-e1", "Vin", "A skaa street urchin.", "mistborn", ()),
+                (2, "book-a-e2", "Vin", "The Last Emperor.", "emperor", ("Reen's sister",)),
+            ],
+        )
+        await _apply(session, "book-a", resolver=AliasResolver())
+
+        early = await _build_graph(session, "book-a", 0.5)
+        late = await _build_graph(session, "book-a", 1.0)
+
+        assert early.nodes[0].description == "A skaa street urchin."
+        assert early.nodes[0].sub_type == "mistborn"
+        assert early.nodes[0].aliases == ()
+        assert late.nodes[0].description == "A skaa street urchin."
+        assert late.nodes[0].sub_type == "mistborn"
+        assert late.nodes[0].aliases == ("Reen's sister",)
+
+    _run_against_postgres(work)
+
+
+def test_the_database_rejects_an_entity_type_outside_the_vocabulary(
+    clean_postgres_database: None,
+) -> None:
+    async def work(session: AsyncSession) -> None:
+        chunk_ids = await _seed_book(session, "book-a", _POSITIONS)
+        session.add(
+            EntityRecord(
+                id="book-a-bad-type",
+                book_id="book-a",
+                chunk_id=chunk_ids[0],
+                name="Luthadel",
+                entity_type="place",
+                reading_position=0.0,
+            )
+        )
+
+        with pytest.raises(IntegrityError):
+            await session.commit()
+        await session.rollback()
+
+    _run_against_postgres(work)
+
+
+def test_every_vocabulary_value_round_trips_through_the_database(
+    clean_postgres_database: None,
+) -> None:
+    async def work(session: AsyncSession) -> None:
+        chunk_ids = await _seed_book(session, "book-a", _POSITIONS)
+        names = sorted(ENTITY_TYPES)
+        session.add_all(
+            EntityRecord(
+                id=f"book-a-e{index}",
+                book_id="book-a",
+                chunk_id=chunk_ids[0],
+                name=name,
+                entity_type=name,
+                reading_position=0.0,
+            )
+            for index, name in enumerate(names)
+        )
+        await session.commit()
+
+        stored = await PostgresKnowledgeRepository(session).get_entities_by_book(
+            "book-a", 1.0
+        )
+        graph = await _build_graph(session, "book-a", 1.0)
+
+        assert sorted(entity.entity_type for entity in stored) == names
+        assert sorted(node.node_type for node in graph.nodes) == names
+
+    _run_against_postgres(work)
+
+
+def test_deleting_a_book_removes_its_places_and_events(
+    clean_postgres_database: None,
+) -> None:
+    async def work(session: AsyncSession) -> None:
+        chunk_ids = await _seed_book(session, "book-a", _POSITIONS)
+        await _add_locations(
+            session, "book-a", chunk_ids, [(0, "book-a-l1", "Luthadel", "")]
+        )
+        await _add_events(session, "book-a", chunk_ids, [(1, "book-a-ev1", "The Siege", "")])
+
+        await PostgresGraphRepository(session).delete_by_book("book-a")
+
+        graph = await _build_graph(session, "book-a", 1.0)
+        assert graph.nodes == ()
+
+    _run_against_postgres(work)
+
+
+def test_event_rows_carry_no_subject_or_object_columns(
+    clean_postgres_database: None,
+) -> None:
+    async def work(session: AsyncSession) -> None:
+        chunk_ids = await _seed_book(session, "book-a", _POSITIONS)
+        await _add_events(
+            session, "book-a", chunk_ids, [(0, "book-a-ev1", "The Siege", "The walls fell")]
+        )
+        repository = PostgresKnowledgeRepository(session)
+
+        events = await repository.get_events_by_book("book-a", 1.0)
+
+        assert [event.name for event in events] == ["The Siege"]
+        assert not hasattr(events[0], "subject")
+        assert not hasattr(events[0], "object")
 
     _run_against_postgres(work)

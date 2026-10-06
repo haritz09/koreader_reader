@@ -33,6 +33,9 @@ class PostgresKnowledgeRepository:
                 chunk_id=e.chunk_id,
                 name=e.name,
                 entity_type=e.entity_type,
+                description=e.description,
+                sub_type=e.sub_type,
+                aliases=list(e.aliases),
                 reading_position=e.reading_position,
             )
             for e in result.entities
@@ -54,6 +57,7 @@ class PostgresKnowledgeRepository:
                 id=ev.event_id,
                 book_id=ev.book_id,
                 chunk_id=ev.chunk_id,
+                name=ev.name,
                 description=ev.description,
                 reading_position=ev.reading_position,
             )
@@ -91,6 +95,9 @@ class PostgresKnowledgeRepository:
                 name=r.name,
                 entity_type=r.entity_type,
                 reading_position=r.reading_position,
+                description=r.description or "",
+                sub_type=r.sub_type,
+                aliases=tuple(r.aliases or ()),
             )
             for r in result.scalars()
         ]
@@ -137,6 +144,7 @@ class PostgresKnowledgeRepository:
                 chunk_id=r.chunk_id,
                 description=r.description,
                 reading_position=r.reading_position,
+                name=r.name,
             )
             for r in result.scalars()
         ]

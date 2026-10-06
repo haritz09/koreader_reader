@@ -36,7 +36,7 @@ jobs:
         run: ruff check .
 
   test:
-    name: Unit and integration tests
+    name: Unit and contract tests
     runs-on: ubuntu-latest
     defaults:
       run:

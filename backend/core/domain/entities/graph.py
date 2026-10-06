@@ -12,18 +12,16 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class GraphNode:
-    """A resolved entity visible at the requested reading position.
-
-    ``label`` and ``first_seen_position`` are computed from visible mentions
-    only, so an alias that first appears later in the book cannot name a node
-    for a reader who has not reached it.
-    """
+    """A resolved entity visible at the requested reading position."""
 
     node_id: str
     label: str
     node_type: str
     first_seen_position: float
     mention_count: int
+    description: str = ""
+    sub_type: str | None = None
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -53,9 +51,8 @@ class BookGraph:
 class EntityMention:
     """One entity mention, already filtered to the reader's visible range.
 
-    ``canonical_id`` is the identity the resolver assigned. It is an internal
-    pointer only: no label is stored per canonical entity, so a node can never
-    inherit a name the reader has not seen yet.
+    ``canonical_id`` is an internal pointer, never a name, so a node cannot
+    inherit a label the reader has not seen yet.
     """
 
     entity_id: str
@@ -63,6 +60,9 @@ class EntityMention:
     name: str
     entity_type: str
     reading_position: float
+    description: str = ""
+    sub_type: str | None = None
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -99,13 +99,7 @@ class EntityCandidate:
 
 @dataclass(frozen=True)
 class EntityResolution:
-    """The outcome of resolving mentions into canonical entities.
-
-    ``canonical_by_entity`` maps every resolved entity id to the id of the
-    canonical row it belongs to. ``changed`` reports whether the mapping
-    differs from what is already stored, so the caller can leave the graph
-    revision untouched when nothing actually moved.
-    """
+    """The outcome of resolving mentions into canonical entities."""
 
     canonical_by_entity: Mapping[str, str]
     method_by_entity: Mapping[str, str]

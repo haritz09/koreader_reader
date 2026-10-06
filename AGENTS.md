@@ -30,6 +30,8 @@ These instructions apply to the entire repository. Read the relevant skill befor
 
 Tests must be behavior-first: derive cases from the feature's public contract and realistic failure modes, not from the current implementation structure. Do not add tests merely to mirror private methods or make coverage numbers increase.
 
+Whenever a change completes or alters a user-visible end-to-end path, add an `e2e` test for it instead of relying on `contract` or `postgres` coverage.
+
 ## Definition of done
 
 A change is complete only when its layer boundaries are preserved, typed contracts remain explicit, spoiler filtering is enforced at the data-access boundary, and focused validation passes.

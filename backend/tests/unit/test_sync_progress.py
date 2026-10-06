@@ -2,10 +2,7 @@ import asyncio
 
 import pytest
 
-from core.application.use_cases.sync_progress import (
-    BookNotFoundError,
-    SyncProgressUseCase,
-)
+from core.application.use_cases.sync_progress import SyncProgressUseCase
 from core.domain.entities.graph import BookGraphState
 from core.domain.entities.reading_progress import ReadingProgress
 from core.domain.errors import BookNotFoundError as DomainBookNotFoundError
@@ -160,7 +157,3 @@ def test_progress_is_stored_when_no_queue_is_configured() -> None:
 
     assert result.graph_generation_queued is False
     assert store.updates == [("book-1", 0.9)]
-
-
-def test_the_use_case_still_exports_its_not_found_error() -> None:
-    assert BookNotFoundError is DomainBookNotFoundError

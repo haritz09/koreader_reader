@@ -118,10 +118,6 @@ def test_worker_allows_three_attempts_for_retryable_jobs() -> None:
 	assert worker_module.WorkerSettings.max_tries == 3
 
 
-def test_worker_settings_has_startup_hook() -> None:
-	assert worker_module.WorkerSettings.on_startup is worker_module.startup
-
-
 def test_worker_connects_to_the_configured_redis() -> None:
 	redis_settings = worker_module.WorkerSettings.redis_settings
 
@@ -259,12 +255,16 @@ def test_graph_job_skips_a_book_without_mentions(monkeypatch) -> None:
 
 
 def test_graph_job_swallows_a_resolution_failure_without_raising(monkeypatch) -> None:
+	book_repository = FakeGraphBookRepository(state=graph_state())
 	monkeypatch.setattr(worker_module, "session_factory", lambda: FakeSessionContext())
 	monkeypatch.setattr(
-		worker_module, "PostgresBookRepository", lambda session: FakeGraphBookRepository(state=graph_state())
+		worker_module, "PostgresBookRepository", lambda session: book_repository
 	)
 	monkeypatch.setattr(
 		worker_module, "PostgresKnowledgeRepository", lambda session: ExplodingKnowledgeRepository()
 	)
 
 	asyncio.run(worker_module.generate_graph({"llm_provider": object()}, "book-123"))
+
+	assert book_repository.applied == []
+	assert book_repository.revision_bumps == []

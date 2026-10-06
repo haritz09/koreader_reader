@@ -54,7 +54,7 @@ def _extraction_result() -> KnowledgeExtractionResult:
             Fact(fact_id="", book_id="", chunk_id="", statement="Frodo found a ring", subject="Frodo", object="ring", reading_position=0.0),
         ],
         events=[
-            Event(event_id="", book_id="", chunk_id="", description="The quest began", reading_position=0.0),
+            Event(event_id="", book_id="", chunk_id="", name="The Fellowship forms", description="The quest began", reading_position=0.0),
         ],
         locations=[
             Location(location_id="", book_id="", chunk_id="", name="Shire", description="Green hills", reading_position=0.0),
