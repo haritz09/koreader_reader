@@ -2,10 +2,6 @@
 
 The repository filters by ``reading_position`` before anything reaches this
 service. Assembly keeps that guarantee at the shape level:
-
-* label, description, sub type, aliases, and ``first_seen_position`` come from
-  visible mentions only, so a name or a detail from later in the book cannot
-  describe a node the reader has not reached.
 * an edge is emitted only when both endpoints resolve to a visible node.
 * an ambiguous normalized name drops the edge instead of guessing.
 """
@@ -55,8 +51,8 @@ def _group_key(mention: EntityMention) -> tuple[str, str]:
 
 def _detail_of(
     ordered: list[EntityMention],
-) -> tuple[str, str | None, tuple[str, ...]]:
-    """Derive description, sub type, and aliases from visible mentions only."""
+) -> tuple[str, str | None, tuple[str, ...], int | None]:
+    """Derive description, sub type, aliases, and importance from visible mentions only."""
     description = next((m.description for m in ordered if m.description), "")
     sub_type = next((m.sub_type for m in ordered if m.sub_type), None)
 
@@ -69,7 +65,11 @@ def _detail_of(
                 continue
             seen.add(key)
             aliases.append(candidate)
-    return description, sub_type, tuple(aliases)
+    importance = min(
+        (m.importance for m in ordered if m.importance is not None),
+        default=None,
+    )
+    return description, sub_type, tuple(aliases), importance
 
 
 def _build_nodes(
@@ -85,7 +85,7 @@ def _build_nodes(
     for group in grouped.values():
         ordered = sorted(group, key=lambda m: (m.reading_position, m.entity_id))
         earliest = ordered[0]
-        description, sub_type, aliases = _detail_of(ordered)
+        description, sub_type, aliases, importance = _detail_of(ordered)
         nodes.append(
             GraphNode(
                 node_id=earliest.canonical_id,
@@ -96,6 +96,7 @@ def _build_nodes(
                 description=description,
                 sub_type=sub_type,
                 aliases=aliases,
+                importance=importance,
             )
         )
         key = normalize_name(earliest.name)

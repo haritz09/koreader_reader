@@ -129,6 +129,7 @@ def test_graph_endpoint_returns_nodes_and_edges_at_the_stored_position() -> None
     assert [node["label"] for node in body["nodes"]] == ["Alice", "Bob"]
     assert body["nodes"][0]["mention_count"] == 1
     assert [edge["edge_id"] for edge in body["edges"]] == ["f1"]
+    assert "importance" in body["nodes"][0]
 
 
 def test_graph_endpoint_merges_mentions_of_the_same_entity() -> None:
@@ -137,6 +138,7 @@ def test_graph_endpoint_merges_mentions_of_the_same_entity() -> None:
     body = response.json()
     assert [node["node_id"] for node in body["nodes"]] == ["e1", "e3", "e4"]
     assert body["nodes"][0]["mention_count"] == 2
+    assert "importance" in body["nodes"][0] or body["nodes"][0].get("importance") is not None
 
 
 def test_graph_endpoint_returns_an_empty_graph_before_any_reading() -> None:
@@ -152,6 +154,7 @@ def test_graph_endpoint_ignores_a_client_supplied_position() -> None:
 
     assert response.status_code == 200
     assert [node["label"] for node in response.json()["nodes"]] == ["Alice", "Bob"]
+    assert "importance" in response.json()["nodes"][0]
 
 
 def test_graph_endpoint_returns_not_found_for_an_unknown_book() -> None:

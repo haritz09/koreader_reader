@@ -47,6 +47,7 @@ def mention(
     description: str = "",
     sub_type: str | None = None,
     aliases: tuple[str, ...] = (),
+    importance: int | None = None,
 ) -> EntityMention:
     return EntityMention(
         entity_id=entity_id,
@@ -57,6 +58,7 @@ def mention(
         description=description,
         sub_type=sub_type,
         aliases=aliases,
+        importance=importance,
     )
 
 
@@ -446,3 +448,100 @@ def test_entity_nodes_carry_no_alias_that_is_only_another_mention_of_the_name() 
     )
 
     assert graph.nodes[0].aliases == ()
+
+
+def test_entity_importance_comes_from_earliest_mention() -> None:
+    graph = build(
+        [
+            mention("e1", "Alice", 0.1, canonical_id="e1", importance=3),
+            mention("e2", "Alice", 0.6, canonical_id="e1", importance=2),
+            mention("e3", "Alice", 0.9, canonical_id="e1", importance=1),
+        ],
+        [],
+        1.0,
+    )
+
+    assert graph.nodes[0].importance == 1
+
+
+def test_entity_importance_uses_minimum_visible_importance() -> None:
+    """A node shows the highest importance encountered so far (smallest number)."""
+    graph = build(
+        [
+            mention("e1", "Alice", 0.1, canonical_id="e1", importance=3),
+            mention("e2", "Alice", 0.4, canonical_id="e1", importance=2),
+        ],
+        [],
+        1.0,
+    )
+
+    assert graph.nodes[0].importance == 2
+
+
+def test_entity_importance_is_none_when_not_set_on_any_mention() -> None:
+    graph = build(
+        [
+            mention("e1", "Alice", 0.1, canonical_id="e1", importance=None),
+            mention("e2", "Alice", 0.6, canonical_id="e1", importance=None),
+        ],
+        [],
+        1.0,
+    )
+
+    assert graph.nodes[0].importance is None
+
+
+def test_entity_importance_respects_reading_position() -> None:
+    """The displayed importance never exceeds what the reader has reached."""
+    mentions = [
+        mention("e1", "Alice", 0.1, canonical_id="e1", importance=3),
+        mention("e2", "Alice", 0.8, canonical_id="e1", importance=1),
+    ]
+
+    early = build(mentions, [], 0.5)
+    late = build(mentions, [], 1.0)
+
+    assert early.nodes[0].importance == 3
+    assert late.nodes[0].importance == 1
+
+
+def test_entity_importance_changing_as_reader_advances() -> None:
+    """Importance rises (numerical value falls) progressively with reading."""
+    graph = build(
+        [
+            mention("e1", "Alice", 0.1, canonical_id="e1", importance=3),
+            mention("e2", "Alice", 0.4, canonical_id="e1", importance=2),
+            mention("e3", "Alice", 0.9, canonical_id="e1", importance=1),
+        ],
+        [],
+        1.0,
+    )
+
+    at_02 = build(
+        [
+            mention("e1", "Alice", 0.1, canonical_id="e1", importance=3),
+        ],
+        [],
+        0.2,
+    )
+    at_05 = build(
+        [
+            mention("e1", "Alice", 0.1, canonical_id="e1", importance=3),
+            mention("e2", "Alice", 0.4, canonical_id="e1", importance=2),
+        ],
+        [],
+        0.5,
+    )
+    at_10 = build(
+        [
+            mention("e1", "Alice", 0.1, canonical_id="e1", importance=3),
+            mention("e2", "Alice", 0.4, canonical_id="e1", importance=2),
+            mention("e3", "Alice", 0.9, canonical_id="e1", importance=1),
+        ],
+        [],
+        1.0,
+    )
+
+    assert at_02.nodes[0].importance == 3
+    assert at_05.nodes[0].importance == 2
+    assert at_10.nodes[0].importance == 1

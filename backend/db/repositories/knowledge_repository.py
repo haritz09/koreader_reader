@@ -37,6 +37,7 @@ class PostgresKnowledgeRepository:
                 sub_type=e.sub_type,
                 aliases=list(e.aliases),
                 reading_position=e.reading_position,
+                importance=e.importance,
             )
             for e in result.entities
         )
@@ -98,6 +99,7 @@ class PostgresKnowledgeRepository:
                 description=r.description or "",
                 sub_type=r.sub_type,
                 aliases=tuple(r.aliases or ()),
+                importance=r.importance,
             )
             for r in result.scalars()
         ]

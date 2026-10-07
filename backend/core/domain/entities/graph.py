@@ -22,6 +22,7 @@ class GraphNode:
     description: str = ""
     sub_type: str | None = None
     aliases: tuple[str, ...] = ()
+    importance: int | None = None
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ class EntityMention:
     description: str = ""
     sub_type: str | None = None
     aliases: tuple[str, ...] = ()
+    importance: int | None = None
 
 
 @dataclass(frozen=True)

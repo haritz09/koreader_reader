@@ -12,8 +12,7 @@ EntityType = Literal[
     "other",
 ]
 
-# What the extraction prompt is asked for. Kept separate from ENTITY_TYPES so
-# the fallback can never be requested from the model.
+# What the extraction prompt is asked for. 
 EXTRACTABLE_ENTITY_TYPES: tuple[str, ...] = (
     "character",
     "enemy",
@@ -26,9 +25,6 @@ ENTITY_TYPES: frozenset[str] = frozenset(get_args(EntityType))
 
 FALLBACK_ENTITY_TYPE: Literal["other"] = "other"
 
-# A node can also be a place or an occurrence, which live in `locations` and
-# `events` rather than in `entities`. These are part of the graph's node_type
-# vocabulary and deliberately not part of entity_type.
 LOCATION_NODE_TYPE: Literal["location"] = "location"
 EVENT_NODE_TYPE: Literal["event"] = "event"
 
@@ -43,6 +39,7 @@ class Entity:
     description: str = ""
     sub_type: str | None = None
     aliases: tuple[str, ...] = ()
+    importance: int | None = None
 
 @dataclass(frozen=True)
 class Fact:

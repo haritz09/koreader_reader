@@ -746,9 +746,11 @@ def test_entity_detail_columns_reach_the_graph_at_the_right_position(
         assert early.nodes[0].description == "A skaa street urchin."
         assert early.nodes[0].sub_type == "mistborn"
         assert early.nodes[0].aliases == ()
+        assert early.nodes[0].importance == 3, f"Expected importance 3, got {early.nodes[0].importance}"
         assert late.nodes[0].description == "A skaa street urchin."
         assert late.nodes[0].sub_type == "mistborn"
         assert late.nodes[0].aliases == ("Reen's sister",)
+        assert late.nodes[0].importance == 1, f"Expected importance 1, got {late.nodes[0].importance}"
 
     _run_against_postgres(work)
 

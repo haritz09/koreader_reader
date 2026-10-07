@@ -16,6 +16,7 @@ class GraphNodeResponse(BaseModel):
     description: str = ""
     sub_type: str | None = None
     aliases: list[str] = Field(default_factory=list, max_length=MAX_ALIASES)
+    importance: int | None = Field(default=None, ge=1, le=3)
 
 
 class GraphEdgeResponse(BaseModel):

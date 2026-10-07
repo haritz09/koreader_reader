@@ -48,6 +48,7 @@ class PostgresGraphRepository:
                 EntityRecord.description,
                 EntityRecord.sub_type,
                 EntityRecord.aliases,
+                EntityRecord.importance,
                 EntityRecord.reading_position,
             )
             .where(EntityRecord.book_id == book_id)
@@ -64,6 +65,7 @@ class PostgresGraphRepository:
                 description=description or "",
                 sub_type=sub_type,
                 aliases=tuple(aliases or ()),
+                importance=importance,
             )
             for (
                 record_id,
@@ -73,6 +75,7 @@ class PostgresGraphRepository:
                 description,
                 sub_type,
                 aliases,
+                importance,
                 mention_position,
             ) in result.all()
         ]

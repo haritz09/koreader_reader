@@ -29,7 +29,7 @@ _SYSTEM_PROMPT = """\
 Given a chunk of text from a book, extract all entities, facts, events, and locations mentioned.
 
 Return a JSON object with four arrays:
-- "entities": objects with "name", "entity_type", optional "description", optional "sub_type", optional "aliases"
+- "entities": objects with "name", "entity_type", optional "description", optional "sub_type", optional "aliases", optional "importance"
 - "facts": objects with "statement", optional "subject", optional "object"
 - "events": objects with "name", "description"
 - "locations": objects with "name", optional "description"
@@ -44,6 +44,7 @@ Return a JSON object with four arrays:
 "sub_type" is an optional narrower kind or trait, such as mistborn, feruchemist, or sword.
 "aliases" is an optional list of other names or titles the same entity is called in
 this passage, copied exactly as written.
+"importance" is an optional importance level from 1 (protagonist) to 3 (tertiary).
 
 An event is a significant occurrence such as a battle. It stands on its own, so give
 it a short "name" and its "description"; do not give it a subject or an object.
@@ -189,6 +190,7 @@ class OpenAIProvider:
                     description=_text(raw.get("description")),
                     sub_type=_text(raw.get("sub_type")) or None,
                     aliases=_aliases(raw.get("aliases"), name),
+                    importance=_importance(raw.get("importance")),
                 )
             )
 
@@ -270,6 +272,12 @@ def _entity_type(value: object) -> EntityType:
             return cast(EntityType, candidate)
     logger.warning("LLM returned an unknown entity_type %r, storing %r", value, FALLBACK_ENTITY_TYPE)
     return FALLBACK_ENTITY_TYPE
+
+
+def _importance(value: object) -> int | None:
+    if isinstance(value, int) and 1 <= value <= 3:
+        return value
+    return None
 
 
 def _aliases(value: object, name: str) -> tuple[str, ...]:

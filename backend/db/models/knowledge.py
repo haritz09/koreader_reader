@@ -24,6 +24,9 @@ READING_POSITION_CHECK = "reading_position >= 0.0 AND reading_position <= 1.0"
 ENTITY_TYPE_VALUES = "'character', 'enemy', 'artifact', 'organization', 'concept', 'other'"
 ENTITY_TYPE_CHECK = f"entity_type IN ({ENTITY_TYPE_VALUES})"
 
+IMPORTANCE_VALUES = "1, 2, 3"
+IMPORTANCE_CHECK = f"importance IS NULL OR importance IN ({IMPORTANCE_VALUES})"
+
 
 class EntityRecord(Base):
 	__tablename__ = "entities"
@@ -32,6 +35,7 @@ class EntityRecord(Base):
 		Index("ix_entities_book_canonical_id", "book_id", "canonical_id"),
 		CheckConstraint(READING_POSITION_CHECK, name="ck_entities_reading_position"),
 		CheckConstraint(ENTITY_TYPE_CHECK, name="ck_entities_entity_type"),
+		CheckConstraint(IMPORTANCE_CHECK, name="ck_entities_importance"),
 	)
 
 	id: Mapped[str] = mapped_column(String(255), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -47,6 +51,7 @@ class EntityRecord(Base):
 	reading_position: Mapped[float] = mapped_column(Float, nullable=False)
 	canonical_id: Mapped[str | None] = mapped_column(ForeignKey("entities.id"))
 	resolution_method: Mapped[str | None] = mapped_column(String(32))
+	importance: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class FactRecord(Base):

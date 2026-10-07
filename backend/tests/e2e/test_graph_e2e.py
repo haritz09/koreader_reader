@@ -32,15 +32,15 @@ def _seed_knowledge(postgres_connection, book_id: str) -> None:
     first_chunk, last_chunk = rows[0][0], rows[-1][0]
     postgres_connection.execute(
         """
-        INSERT INTO entities (id, book_id, chunk_id, name, entity_type, reading_position)
-        VALUES (%s, %s, %s, 'Alice', 'character', 0.0)
+        INSERT INTO entities (id, book_id, chunk_id, name, entity_type, reading_position, importance)
+        VALUES (%s, %s, %s, 'Alice', 'character', 0.0, 3)
         """,
         (f"{book_id}-e1", book_id, first_chunk),
     )
     postgres_connection.execute(
         """
-        INSERT INTO entities (id, book_id, chunk_id, name, entity_type, reading_position)
-        VALUES (%s, %s, %s, 'The Ice Queen', 'character', 0.95)
+        INSERT INTO entities (id, book_id, chunk_id, name, entity_type, reading_position, importance)
+        VALUES (%s, %s, %s, 'The Ice Queen', 'character', 0.95, 1)
         """,
         (f"{book_id}-e2", book_id, last_chunk),
     )
