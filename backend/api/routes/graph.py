@@ -33,19 +33,20 @@ async def get_book_graph(
 		book_id=graph.book_id,
 		position=graph.position,
 		revision=graph.revision,
-		nodes=[
-			GraphNodeResponse(
-				node_id=node.node_id,
-				label=node.label,
-				node_type=node.node_type,
-				first_seen_position=node.first_seen_position,
-				mention_count=node.mention_count,
-				description=node.description,
-				sub_type=node.sub_type,
-				aliases=list(node.aliases),
-			)
-			for node in graph.nodes
-		],
+        nodes=[
+					GraphNodeResponse(
+						node_id=node.node_id,
+						label=node.label,
+						node_type=node.node_type,
+						first_seen_position=node.first_seen_position,
+						mention_count=node.mention_count,
+						description=node.description,
+						sub_type=node.sub_type,
+						aliases=list(node.aliases),
+						importance=node.importance,
+					)
+					for node in graph.nodes
+				],
 		edges=[
 			GraphEdgeResponse(
 				edge_id=edge.edge_id,

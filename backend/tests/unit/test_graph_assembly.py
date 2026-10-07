@@ -507,16 +507,6 @@ def test_entity_importance_respects_reading_position() -> None:
 
 def test_entity_importance_changing_as_reader_advances() -> None:
     """Importance rises (numerical value falls) progressively with reading."""
-    graph = build(
-        [
-            mention("e1", "Alice", 0.1, canonical_id="e1", importance=3),
-            mention("e2", "Alice", 0.4, canonical_id="e1", importance=2),
-            mention("e3", "Alice", 0.9, canonical_id="e1", importance=1),
-        ],
-        [],
-        1.0,
-    )
-
     at_02 = build(
         [
             mention("e1", "Alice", 0.1, canonical_id="e1", importance=3),
