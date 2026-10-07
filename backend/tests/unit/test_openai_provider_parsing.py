@@ -74,6 +74,31 @@ def test_entity_description_sub_type_and_aliases_are_parsed() -> None:
     assert parsed.aliases == ("Vine", "Reen's sister")
 
 
+def test_entity_importance_is_parsed() -> None:
+    result = parse({"entities": [entity(importance=1)]})
+    assert result["entities"][0].importance == 1
+
+    result = parse({"entities": [entity(importance=2)]})
+    assert result["entities"][0].importance == 2
+
+    result = parse({"entities": [entity(importance=3)]})
+    assert result["entities"][0].importance == 3
+
+
+def test_entity_importance_is_none_when_missing_or_invalid() -> None:
+    result = parse({"entities": [entity()]})
+    assert result["entities"][0].importance is None
+
+    result = parse({"entities": [entity(importance=0)]})
+    assert result["entities"][0].importance is None
+
+    result = parse({"entities": [entity(importance=4)]})
+    assert result["entities"][0].importance is None
+
+    result = parse({"entities": [entity(importance="high")]})
+    assert result["entities"][0].importance is None
+
+
 def test_aliases_drop_the_name_itself_duplicates_and_blanks() -> None:
     result = parse(
         {

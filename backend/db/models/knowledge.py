@@ -1,8 +1,4 @@
-"""Knowledge persistence models.
-
-These four tables mirror ``core/domain/entities/knowledge.py``. The structural
-spine they attach to lives in ``chapter.py`` and ``chunk.py``.
-"""
+"""Knowledge persistence models."""
 
 import uuid
 
@@ -12,6 +8,7 @@ from sqlalchemy import (
 	Float,
 	ForeignKey,
 	Index,
+	Integer,
 	String,
 	Text,
 )
@@ -52,7 +49,6 @@ class EntityRecord(Base):
 	canonical_id: Mapped[str | None] = mapped_column(ForeignKey("entities.id"))
 	resolution_method: Mapped[str | None] = mapped_column(String(32))
 	importance: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
 
 class FactRecord(Base):
 	__tablename__ = "facts"

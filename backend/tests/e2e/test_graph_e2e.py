@@ -93,6 +93,7 @@ def test_graph_reflects_synced_progress_without_leaking_later_knowledge(
     assert graph["book_id"] == book_id
     assert graph["position"] == 0.5
     assert [node["label"] for node in graph["nodes"]] == ["Alice"]
+    assert graph["nodes"][0]["importance"] == 3
     assert graph["edges"] == []
 
 
@@ -127,6 +128,8 @@ def test_graph_grows_when_the_reader_advances(
 
     assert sorted(node["label"] for node in graph["nodes"]) == ["Alice", "The Ice Queen"]
     assert [edge["statement"] for edge in graph["edges"]] == ["Alice is the Ice Queen"]
+    importance_by_label = {node["label"]: node["importance"] for node in graph["nodes"]}
+    assert importance_by_label == {"Alice": 3, "The Ice Queen": 1}
 
 
 @pytest.mark.e2e
@@ -168,4 +171,5 @@ def test_rewinding_shrinks_the_graph(
     assert rewind["graph_generation_queued"] is False
     rewound = e2e_client.get(f"/api/v1/ebooks/{book_id}/graph").json()
     assert [node["label"] for node in rewound["nodes"]] == ["Alice"]
+    assert rewound["nodes"][0]["importance"] == 3
     assert rewound["edges"] == []

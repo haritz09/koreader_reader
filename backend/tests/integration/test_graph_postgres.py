@@ -1,9 +1,4 @@
-"""Graph and reading-position behaviour against a real PostgreSQL database.
-
-These drive the real repositories and services because the anti-spoiler
-guarantee lives in the SQL. A stubbed session would happily pass while the
-``reading_position`` predicate was missing from a real query.
-"""
+"""Graph and reading-position behaviour against a real PostgreSQL database."""
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
@@ -101,7 +96,6 @@ async def _add_entities(
     chunk_ids: dict[int, str],
     rows: Sequence[tuple[int, str, str, str]],
 ) -> None:
-    """Insert mentions as (chunk index, entity id, name, entity type)."""
     for index, entity_id, name, entity_type in rows:
         position = _position_for(book_id, index)
         session.add(
@@ -121,13 +115,9 @@ async def _add_entity_details(
     session: AsyncSession,
     book_id: str,
     chunk_ids: dict[int, str],
-    rows: Sequence[tuple[int, str, str, str, str | None, Sequence[str]]],
+    rows: Sequence[tuple[int, str, str, str, str | None, Sequence[str], int | None]],
 ) -> None:
-    """Insert mentions carrying detail.
-
-    Rows are (chunk index, entity id, name, description, sub type, aliases).
-    """
-    for index, entity_id, name, description, sub_type, aliases in rows:
+    for index, entity_id, name, description, sub_type, aliases, importance in rows:
         session.add(
             EntityRecord(
                 id=entity_id,
@@ -139,6 +129,7 @@ async def _add_entity_details(
                 description=description,
                 sub_type=sub_type,
                 aliases=list(aliases),
+                importance=importance,
             )
         )
     await session.commit()
@@ -150,7 +141,6 @@ async def _add_facts(
     chunk_ids: dict[int, str],
     rows: Sequence[tuple[int, str, str, str, str]],
 ) -> None:
-    """Insert facts as (chunk index, fact id, subject, object, statement)."""
     for index, fact_id, subject, object_, statement in rows:
         session.add(
             FactRecord(
@@ -172,7 +162,6 @@ async def _add_locations(
     chunk_ids: dict[int, str],
     rows: Sequence[tuple[int, str, str, str]],
 ) -> None:
-    """Insert places as (chunk index, location id, name, description)."""
     for index, location_id, name, description in rows:
         session.add(
             LocationRecord(
@@ -193,7 +182,6 @@ async def _add_events(
     chunk_ids: dict[int, str],
     rows: Sequence[tuple[int, str, str, str]],
 ) -> None:
-    """Insert events as (chunk index, event id, name, description)."""
     for index, event_id, name, description in rows:
         session.add(
             EventRecord(
@@ -734,8 +722,8 @@ def test_entity_detail_columns_reach_the_graph_at_the_right_position(
             "book-a",
             chunk_ids,
             [
-                (0, "book-a-e1", "Vin", "A skaa street urchin.", "mistborn", ()),
-                (2, "book-a-e2", "Vin", "The Last Emperor.", "emperor", ("Reen's sister",)),
+                (0, "book-a-e1", "Vin", "A skaa street urchin.", "mistborn", (), 3),
+                (2, "book-a-e2", "Vin", "The Last Emperor.", "emperor", ("Reen's sister",), 1),
             ],
         )
         await _apply(session, "book-a", resolver=AliasResolver())
