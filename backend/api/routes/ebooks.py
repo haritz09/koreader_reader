@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from api.dependencies import get_book_repository, get_upload_ebook_use_case
-from api.schemas.ebooks import EbookStatusResponse, EbookUploadResponse
+from api.schemas.ebooks import EbookListResponse, EbookStatusResponse, EbookUploadResponse
 from core.application.use_cases.process_ebook import (
 	EbookTooLargeError,
 	InvalidEbookError,
@@ -9,6 +9,25 @@ from core.application.use_cases.process_ebook import (
 )
 
 router = APIRouter(prefix="/ebooks", tags=["ebooks"])
+
+
+@router.get("", response_model=EbookListResponse)
+async def list_ebooks(
+	book_repository=Depends(get_book_repository),
+) -> EbookListResponse:
+	books = await book_repository.list_all()
+	return EbookListResponse(
+		books=[
+			EbookStatusResponse(
+				book_id=book.id,
+				document_hash=book.document_hash,
+				processing_status=book.processing_status,
+				progress_position=book.progress_position,
+				processing_error=book.processing_error,
+			)
+			for book in books
+		]
+	)
 
 
 @router.get(

@@ -147,3 +147,7 @@ class PostgresBookRepository:
 		revision = result.scalar_one_or_none()
 		await self._session.commit()
 		return revision or 0
+
+	async def list_all(self) -> list[Book]:
+		result = await self._session.execute(select(Book))
+		return list(result.scalars().all())

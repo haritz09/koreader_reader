@@ -38,6 +38,10 @@ export interface EbookStatusResponse extends EbookUploadResponse {
   processing_error: string | null;
 }
 
+export interface EbookListResponse {
+  books: EbookStatusResponse[];
+}
+
 export interface KoreaderSyncRequest {
   document: string;
   progress: number;

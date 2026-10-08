@@ -51,3 +51,6 @@ class BookRepository(Protocol):
 
     async def bump_graph_revision(self, book_id: str) -> int:
         ...
+
+    async def list_all(self) -> list[Any]:
+        ...
