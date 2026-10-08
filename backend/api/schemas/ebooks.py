@@ -10,6 +10,7 @@ class EbookUploadResponse(BaseModel):
 class EbookStatusResponse(EbookUploadResponse):
     progress_position: float
     processing_error: str | None = None
+    cover_url: str | None = None
 
 
 class EbookListResponse(BaseModel):

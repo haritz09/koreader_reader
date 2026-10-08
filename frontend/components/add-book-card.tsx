@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { uploadEbook } from "@/lib/api";
 
 interface AddBookCardProps {
@@ -10,7 +10,9 @@ interface AddBookCardProps {
 export function AddBookCard({ onUploaded }: AddBookCardProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
     if (!file.name.endsWith(".epub")) {
@@ -24,15 +26,39 @@ export function AddBookCard({ onUploaded }: AddBookCardProps) {
 
     setIsUploading(true);
     setError(null);
+    setProgress(0);
 
-    try {
-      await uploadEbook(file);
-      onUploaded();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al subir");
-    } finally {
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData();
+    formData.append("file", file);
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        setProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    });
+
+    xhr.addEventListener("load", () => {
       setIsUploading(false);
-    }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onUploaded();
+      } else {
+        try {
+          const err = JSON.parse(xhr.responseText);
+          setError(err.detail || `Error: ${xhr.status}`);
+        } catch {
+          setError(`Error: ${xhr.status}`);
+        }
+      }
+    });
+
+    xhr.addEventListener("error", () => {
+      setIsUploading(false);
+      setError("Error de red");
+    });
+
+    xhr.open("POST", `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/ebooks`);
+    xhr.send(formData);
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -51,8 +77,8 @@ export function AddBookCard({ onUploaded }: AddBookCardProps) {
     <div
       className={`flex aspect-[2/3] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
         isDragging
-          ? "border-[#5C6B4F] bg-[#5C6B4F]/5"
-          : "border-gray-300 bg-gray-50 hover:border-gray-400"
+          ? "border-accent bg-accent/5"
+          : "border-gray-300 bg-gray-50 hover:border-gray-400 dark:border-gray-700 dark:bg-gray-800/50 dark:hover:border-gray-600"
       }`}
       onDragOver={(e) => {
         e.preventDefault();
@@ -60,34 +86,43 @@ export function AddBookCard({ onUploaded }: AddBookCardProps) {
       }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={handleDrop}
-      onClick={() => document.getElementById("file-input")?.click()}
+      onClick={() => inputRef.current?.click()}
     >
       <input
-        id="file-input"
+        ref={inputRef}
         type="file"
         accept=".epub"
         className="hidden"
         onChange={handleChange}
       />
       {isUploading ? (
-        <div className="flex flex-col items-center gap-2">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#5C6B4F] border-t-transparent" />
-          <span className="text-xs text-gray-500">Subiendo...</span>
+        <div className="flex w-3/4 flex-col items-center gap-3">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+            <div
+              className="h-full rounded-full bg-accent transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            {progress}%
+          </span>
         </div>
       ) : (
         <>
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#5C6B4F]/10">
-            <svg className="h-6 w-6 text-[#5C6B4F]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/10">
+            <svg className="h-6 w-6 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
           </div>
-          <p className="mt-3 text-sm font-medium text-gray-900">Añadir libro</p>
-          <p className="mt-1 text-xs text-gray-500">EPUB hasta 50 MB</p>
+          <p className="mt-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+            Añadir libro
+          </p>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            EPUB hasta 50 MB
+          </p>
         </>
       )}
-      {error && (
-        <p className="mt-2 text-xs text-red-500">{error}</p>
-      )}
+      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
     </div>
   );
 }

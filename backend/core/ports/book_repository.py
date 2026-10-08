@@ -54,3 +54,6 @@ class BookRepository(Protocol):
 
     async def list_all(self) -> list[Any]:
         ...
+
+    async def set_cover_path(self, book_id: str, cover_path: str) -> None:
+        ...

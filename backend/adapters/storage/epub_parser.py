@@ -3,7 +3,7 @@
 import asyncio
 
 from bs4 import BeautifulSoup
-from ebooklib import ITEM_DOCUMENT, epub
+from ebooklib import ITEM_COVER, ITEM_DOCUMENT, ITEM_IMAGE, epub
 
 from core.domain.entities.chapter import Chapter
 
@@ -11,6 +11,9 @@ from core.domain.entities.chapter import Chapter
 class EpubParser:
 	async def parse(self, storage_path: str) -> list[Chapter]:
 		return await asyncio.to_thread(self._parse_sync, storage_path)
+
+	async def extract_cover(self, storage_path: str) -> bytes | None:
+		return await asyncio.to_thread(self._extract_cover_sync, storage_path)
 
 	@staticmethod
 	def _parse_sync(storage_path: str) -> list[Chapter]:
@@ -30,3 +33,17 @@ class EpubParser:
 				)
 			)
 		return chapters
+
+	@staticmethod
+	def _extract_cover_sync(storage_path: str) -> bytes | None:
+		book = epub.read_epub(storage_path)
+		for item in book.get_items_of_type(ITEM_COVER):
+			content = item.get_content()
+			if content:
+				return content
+		for item in book.get_items_of_type(ITEM_IMAGE):
+			if "cover" in item.get_name().lower():
+				content = item.get_content()
+				if content:
+					return content
+		return None

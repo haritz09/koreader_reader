@@ -151,3 +151,10 @@ class PostgresBookRepository:
 	async def list_all(self) -> list[Book]:
 		result = await self._session.execute(select(Book))
 		return list(result.scalars().all())
+
+	async def set_cover_path(self, book_id: str, cover_path: str) -> None:
+		book = await self.get_by_id(book_id)
+		if book is None:
+			return
+		book.cover_path = cover_path
+		await self._session.commit()

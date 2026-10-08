@@ -39,6 +39,11 @@ async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 		await repository.mark_processing(book_id)
 		try:
 			chapters = await parser.parse(storage_path)
+			cover_content = await parser.extract_cover(storage_path)
+			if cover_content:
+				cover_key = f"{book_id}/cover.jpg"
+				cover_path = await storage.save(cover_key, cover_content)
+				await repository.set_cover_path(book_id, cover_path)
 		except Exception as error:  # noqa: BLE001 - any parse failure must mark the book failed
 			await repository.mark_failed(book_id, str(error))
 			return

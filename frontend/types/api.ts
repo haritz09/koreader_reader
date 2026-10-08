@@ -36,6 +36,7 @@ export interface EbookUploadResponse {
 export interface EbookStatusResponse extends EbookUploadResponse {
   progress_position: number;
   processing_error: string | null;
+  cover_url: string | null;
 }
 
 export interface EbookListResponse {

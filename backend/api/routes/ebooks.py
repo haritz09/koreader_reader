@@ -1,4 +1,9 @@
+import asyncio
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse, StreamingResponse
 
 from api.dependencies import get_book_repository, get_upload_ebook_use_case
 from api.schemas.ebooks import EbookListResponse, EbookStatusResponse, EbookUploadResponse
@@ -7,6 +12,7 @@ from core.application.use_cases.process_ebook import (
 	InvalidEbookError,
 	UploadEbookUseCase,
 )
+from core.config import settings
 
 router = APIRouter(prefix="/ebooks", tags=["ebooks"])
 
@@ -24,6 +30,7 @@ async def list_ebooks(
 				processing_status=book.processing_status,
 				progress_position=book.progress_position,
 				processing_error=book.processing_error,
+				cover_url=f"/api/v1/ebooks/{book.id}/cover" if book.cover_path else None,
 			)
 			for book in books
 		]
@@ -48,6 +55,7 @@ async def get_ebook_status(
 		processing_status=book.processing_status,
 		progress_position=book.progress_position,
 		processing_error=book.processing_error,
+		cover_url=f"/api/v1/ebooks/{book.id}/cover" if book.cover_path else None,
 	)
 
 
@@ -73,5 +81,48 @@ async def upload_ebook(
 		book_id=result.book_id,
 		document_hash=result.document_hash,
 		processing_status=result.processing_status,
+	)
+
+
+@router.get("/{book_id}/cover")
+async def get_book_cover(
+	book_id: str,
+	book_repository=Depends(get_book_repository),
+) -> FileResponse:
+	book = await book_repository.get_by_id(book_id)
+	if book is None or not book.cover_path:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover not found")
+	cover_path = Path(book.cover_path)
+	if not cover_path.exists():
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover file not found")
+	return FileResponse(cover_path, media_type="image/jpeg")
+
+
+@router.get("/{book_id}/events")
+async def book_events(
+	book_id: str,
+	book_repository=Depends(get_book_repository),
+) -> StreamingResponse:
+	async def event_generator():
+		last_status = None
+		while True:
+			book = await book_repository.get_by_id(book_id)
+			if book is None:
+				yield f"data: {json.dumps({'type': 'error', 'message': 'Book not found'})}\n\n"
+				break
+			if book.processing_status != last_status:
+				last_status = book.processing_status
+				yield f"data: {json.dumps({'type': 'status', 'status': book.processing_status, 'error': book.processing_error})}\n\n"
+				if book.processing_status in ("ready", "failed"):
+					break
+			await asyncio.sleep(1)
+
+	return StreamingResponse(
+		event_generator(),
+		media_type="text/event-stream",
+		headers={
+			"Cache-Control": "no-cache",
+			"Connection": "keep-alive",
+		},
 	)
 """Ebook upload and processing endpoints."""
