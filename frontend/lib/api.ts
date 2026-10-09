@@ -99,3 +99,11 @@ export async function syncProgress(data: {
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }
+
+export async function retryEbook(bookId: string): Promise<{ book_id: string; processing_status: string }> {
+  const res = await fetch(`${API_BASE}/ebooks/${bookId}/retry`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}

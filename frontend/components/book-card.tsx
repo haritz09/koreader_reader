@@ -1,16 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { retryEbook } from "@/lib/api";
 import type { EbookStatusResponse } from "@/types/api";
 
 interface BookCardProps {
   book: EbookStatusResponse;
   onSelect: (bookId: string) => void;
+  onRetry: (bookId: string) => void;
   index?: number;
 }
 
-export function BookCard({ book, onSelect, index = 0 }: BookCardProps) {
+export function BookCard({ book, onSelect, onRetry, index = 0 }: BookCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const progressPercent = Math.round(book.progress_position * 100);
 
   const statusLabel =
@@ -21,6 +24,19 @@ export function BookCard({ book, onSelect, index = 0 }: BookCardProps) {
         : book.processing_status === "failed"
           ? "Error"
           : "Pendiente";
+
+  const handleRetry = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRetrying(true);
+    try {
+      await retryEbook(book.book_id);
+      onRetry(book.book_id);
+    } catch (err) {
+      console.error("Retry failed:", err);
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   return (
     <div
@@ -45,6 +61,15 @@ export function BookCard({ book, onSelect, index = 0 }: BookCardProps) {
           <div className="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-white">
             {statusLabel}
           </div>
+        )}
+        {book.processing_status === "failed" && (
+          <button
+            onClick={handleRetry}
+            disabled={retrying}
+            className="absolute bottom-2 left-2 right-2 rounded-md bg-white/90 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-white disabled:opacity-50 dark:bg-gray-900/90 dark:text-gray-200 dark:hover:bg-gray-900"
+          >
+            {retrying ? "Reintentando..." : "Reintentar"}
+          </button>
         )}
         <button
           className="absolute right-2 top-2 rounded-full bg-white/80 p-1 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-900/80"

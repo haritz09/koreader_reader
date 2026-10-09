@@ -11,6 +11,7 @@ from adapters.queue.arq_queue import ArqEbookProcessingQueue
 from adapters.storage.local_ebook_storage import LocalEbookStorage
 from core.application.use_cases.get_book_graph import GetBookGraphUseCase
 from core.application.use_cases.process_ebook import UploadEbookUseCase
+from core.application.use_cases.retry_ebook import RetryEbookUseCase
 from core.application.use_cases.sync_progress import SyncProgressUseCase
 from core.config import settings
 from core.ports.book_repository import BookRepository
@@ -91,3 +92,10 @@ def get_upload_ebook_use_case(
 		queue,
 		max_size_bytes=settings.max_ebook_size_bytes,
 	)
+
+
+def get_retry_ebook_use_case(
+	book_repository: BookRepository = Depends(get_book_repository),
+	queue: EbookProcessingQueue = Depends(get_ebook_processing_queue),
+) -> RetryEbookUseCase:
+	return RetryEbookUseCase(book_repository, queue)

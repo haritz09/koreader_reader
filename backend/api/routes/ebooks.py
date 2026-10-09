@@ -5,14 +5,22 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 
-from api.dependencies import get_book_repository, get_upload_ebook_use_case
+from api.dependencies import get_book_repository, get_retry_ebook_use_case, get_upload_ebook_use_case
 from api.schemas.ebooks import EbookListResponse, EbookStatusResponse, EbookUploadResponse
 from core.application.use_cases.process_ebook import (
 	EbookTooLargeError,
 	InvalidEbookError,
 	UploadEbookUseCase,
 )
+from core.application.use_cases.retry_ebook import (
+	BookNotFailedError,
+	BookNotFoundError,
+	RetryEbookUseCase,
+	RetryResult,
+)
 from core.config import settings
+from db.repositories.postgres_book_repository import PostgresBookRepository
+from db.session import session_factory
 
 router = APIRouter(prefix="/ebooks", tags=["ebooks"])
 
@@ -84,6 +92,31 @@ async def upload_ebook(
 	)
 
 
+@router.post("/{book_id}/retry", status_code=status.HTTP_202_ACCEPTED)
+async def retry_ebook(
+	book_id: str,
+	use_case: RetryEbookUseCase = Depends(get_retry_ebook_use_case),
+) -> EbookUploadResponse:
+	try:
+		result: RetryResult = await use_case.execute(book_id)
+	except BookNotFoundError as error:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND,
+			detail=str(error),
+		) from error
+	except BookNotFailedError as error:
+		raise HTTPException(
+			status_code=status.HTTP_409_CONFLICT,
+			detail=str(error),
+		) from error
+
+	return EbookUploadResponse(
+		book_id=result.book_id,
+		document_hash="",
+		processing_status=result.processing_status,
+	)
+
+
 @router.get("/{book_id}/cover")
 async def get_book_cover(
 	book_id: str,
@@ -101,21 +134,22 @@ async def get_book_cover(
 @router.get("/{book_id}/events")
 async def book_events(
 	book_id: str,
-	book_repository=Depends(get_book_repository),
 ) -> StreamingResponse:
 	async def event_generator():
-		last_status = None
-		while True:
-			book = await book_repository.get_by_id(book_id)
-			if book is None:
-				yield f"data: {json.dumps({'type': 'error', 'message': 'Book not found'})}\n\n"
-				break
-			if book.processing_status != last_status:
-				last_status = book.processing_status
-				yield f"data: {json.dumps({'type': 'status', 'status': book.processing_status, 'error': book.processing_error})}\n\n"
-				if book.processing_status in ("ready", "failed"):
+		async with session_factory() as session:
+			repository = PostgresBookRepository(session)
+			last_status = None
+			while True:
+				book = await repository.get_by_id(book_id)
+				if book is None:
+					yield f"data: {json.dumps({'type': 'error', 'message': 'Book not found'})}\n\n"
 					break
-			await asyncio.sleep(1)
+				if book.processing_status != last_status:
+					last_status = book.processing_status
+					yield f"data: {json.dumps({'type': 'status', 'status': book.processing_status, 'error': book.processing_error})}\n\n"
+					if book.processing_status in ("ready", "failed"):
+						break
+				await asyncio.sleep(1)
 
 	return StreamingResponse(
 		event_generator(),

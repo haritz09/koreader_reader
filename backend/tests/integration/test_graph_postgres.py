@@ -42,10 +42,14 @@ class AliasResolver:
 
 def _run_against_postgres(work: Callable[[AsyncSession], Awaitable[None]]) -> None:
     async def _main() -> None:
+        session: AsyncSession | None = None
         try:
-            async with session_factory() as session:
+            async with session_factory() as active_session:
+                session = active_session
                 await work(session)
         finally:
+            if session is not None:
+                await session.close()
             await engine.dispose()
 
     asyncio.run(_main())

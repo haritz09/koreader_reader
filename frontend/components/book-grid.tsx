@@ -100,6 +100,9 @@ export function BookGrid({ onSelectBook }: BookGridProps) {
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
           Sube tu primer EPUB para empezar
         </p>
+        <div className="mt-6">
+          <AddBookCard onUploaded={fetchBooks} />
+        </div>
       </div>
     );
   }
@@ -128,7 +131,13 @@ export function BookGrid({ onSelectBook }: BookGridProps) {
       <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         <AddBookCard onUploaded={fetchBooks} />
         {sortedBooks.map((book, i) => (
-          <BookCard key={book.book_id} book={book} onSelect={onSelectBook} index={i} />
+          <BookCard
+            key={book.book_id}
+            book={book}
+            onSelect={onSelectBook}
+            onRetry={fetchBooks}
+            index={i}
+          />
         ))}
       </div>
     </div>

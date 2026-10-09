@@ -1,12 +1,13 @@
 """Book repository implementation for postgres."""
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.entities.graph import BookGraphState
 from db.models.book import Book
 from db.models.chapter import ChapterRecord
 from db.models.chunk import ChunkRecord
+from db.models.knowledge import EntityRecord, EventRecord, FactRecord, LocationRecord
 
 
 class PostgresBookRepository:
@@ -157,4 +158,14 @@ class PostgresBookRepository:
 		if book is None:
 			return
 		book.cover_path = cover_path
+		await self._session.commit()
+
+	async def delete(self, book_id: str) -> None:
+		for table in (EntityRecord, FactRecord, EventRecord, LocationRecord, ChunkRecord, ChapterRecord):
+			await self._session.execute(
+				table.__table__.delete().where(table.book_id == book_id)
+			)
+		await self._session.execute(
+			delete(Book).where(Book.id == book_id)
+		)
 		await self._session.commit()

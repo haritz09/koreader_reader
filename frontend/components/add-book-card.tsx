@@ -52,7 +52,7 @@ export function AddBookCard({ onUploaded }: AddBookCardProps) {
 
   return (
     <div
-      className={`flex aspect-[2/3] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
+      className={`flex w-36 aspect-[2/3] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
         isDragging
           ? "border-accent bg-accent/5"
           : "border-gray-300 bg-gray-50 hover:border-gray-400 dark:border-gray-700 dark:bg-gray-800/50 dark:hover:border-gray-600"
@@ -95,7 +95,7 @@ export function AddBookCard({ onUploaded }: AddBookCardProps) {
             Añadir libro
           </p>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            EPUB hasta 50 MB
+            EPUB hasta 10 MB
           </p>
         </>
       )}

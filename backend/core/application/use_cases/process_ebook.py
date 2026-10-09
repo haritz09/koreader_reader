@@ -51,11 +51,14 @@ class UploadEbookUseCase:
 		document_hash = hashlib.md5(content).hexdigest()
 		existing = await self._repository.get_by_document_hash(document_hash)
 		if existing is not None:
-			return EbookUploadResult(
-				book_id=existing.id,
-				document_hash=existing.document_hash,
-				processing_status=existing.processing_status,
-			)
+			if existing.processing_status == "failed":
+				await self._repository.delete(existing.id)
+			else:
+				return EbookUploadResult(
+					book_id=existing.id,
+					document_hash=existing.document_hash,
+					processing_status=existing.processing_status,
+				)
 
 		book_id = str(uuid.uuid4())
 		storage_key = f"books/{book_id}.epub"

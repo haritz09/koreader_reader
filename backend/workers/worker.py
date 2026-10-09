@@ -60,12 +60,13 @@ async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 			await extraction.extract_from_chunks(book_id, chunks_with_ids)
 			await repository.mark_ready(book_id)
 			await storage.delete(storage_key)
-			await _enqueue_graph_generation(book_id)
 		except Exception as error:
 			await repository.mark_failed(book_id, str(error))
 			if isinstance(error, (ValueError, EOFError)):
 				return
 			raise
+
+	await _enqueue_graph_generation(book_id)
 
 
 async def _enqueue_graph_generation(book_id: str) -> None:
