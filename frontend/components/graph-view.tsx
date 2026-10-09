@@ -9,7 +9,8 @@ import ReactFlow, {
   type Edge,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import type { GraphResponse, GraphNodeResponse } from "@/types/api";
+import { getGraph } from "@/lib/api";
+import type { GraphNodeResponse } from "@/types/api";
 
 interface GraphViewProps {
   bookId: string;
@@ -31,14 +32,10 @@ export function GraphView({ bookId }: GraphViewProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-
   const fetchGraph = useCallback(async () => {
     try {
       setError(null);
-      const res = await fetch(`${apiBase}/ebooks/${bookId}/graph`);
-      if (!res.ok) throw new Error(`Error: ${res.status}`);
-      const data: GraphResponse = await res.json();
+      const data = await getGraph(bookId);
 
       const flowNodes: Node[] = data.nodes.map((node: GraphNodeResponse) => ({
         id: node.node_id,
@@ -78,7 +75,7 @@ export function GraphView({ bookId }: GraphViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [bookId, apiBase]);
+  }, [bookId]);
 
   useEffect(() => {
     fetchGraph();

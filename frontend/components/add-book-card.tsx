@@ -19,8 +19,8 @@ export function AddBookCard({ onUploaded }: AddBookCardProps) {
       setError("Solo archivos EPUB");
       return;
     }
-    if (file.size > 50 * 1024 * 1024) {
-      setError("Archivo demasiado grande (máx 50 MB)");
+    if (file.size > 10 * 1024 * 1024) {
+      setError("Archivo demasiado grande (máx 10 MB)");
       return;
     }
 
@@ -28,37 +28,14 @@ export function AddBookCard({ onUploaded }: AddBookCardProps) {
     setError(null);
     setProgress(0);
 
-    const xhr = new XMLHttpRequest();
-    const formData = new FormData();
-    formData.append("file", file);
-
-    xhr.upload.addEventListener("progress", (e) => {
-      if (e.lengthComputable) {
-        setProgress(Math.round((e.loaded / e.total) * 100));
-      }
-    });
-
-    xhr.addEventListener("load", () => {
+    try {
+      await uploadEbook(file, setProgress);
+      onUploaded();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al subir");
+    } finally {
       setIsUploading(false);
-      if (xhr.status >= 200 && xhr.status < 300) {
-        onUploaded();
-      } else {
-        try {
-          const err = JSON.parse(xhr.responseText);
-          setError(err.detail || `Error: ${xhr.status}`);
-        } catch {
-          setError(`Error: ${xhr.status}`);
-        }
-      }
-    });
-
-    xhr.addEventListener("error", () => {
-      setIsUploading(false);
-      setError("Error de red");
-    });
-
-    xhr.open("POST", `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"}/ebooks`);
-    xhr.send(formData);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {

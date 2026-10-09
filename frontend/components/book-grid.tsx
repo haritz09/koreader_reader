@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { EbookListResponse } from "@/types/api";
+import { getBooks, streamBookEvents } from "@/lib/api";
+import type { EbookStatusResponse } from "@/types/api";
 import { BookCard } from "./book-card";
 import { AddBookCard } from "./add-book-card";
 
@@ -10,58 +11,51 @@ interface BookGridProps {
 }
 
 export function BookGrid({ onSelectBook }: BookGridProps) {
-  const [books, setBooks] = useState<EbookListResponse["books"]>([]);
+  const [books, setBooks] = useState<EbookStatusResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"recent" | "title">("recent");
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-
   const fetchBooks = useCallback(async () => {
     try {
       setError(null);
-      const res = await fetch(`${apiBase}/ebooks`);
-      if (!res.ok) throw new Error(`Error: ${res.status}`);
-      const data: EbookListResponse = await res.json();
+      const data = await getBooks();
       setBooks(data.books);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar libros");
     } finally {
       setLoading(false);
     }
-  }, [apiBase]);
+  }, []);
 
   useEffect(() => {
     fetchBooks();
   }, [fetchBooks]);
 
   useEffect(() => {
-    const processingBooks = books.filter((b) => b.processing_status === "processing" || b.processing_status === "pending");
+    const processingBooks = books.filter(
+      (b) => b.processing_status === "processing" || b.processing_status === "pending"
+    );
     if (processingBooks.length === 0) return;
 
-    const eventSources = processingBooks.map((book) => {
-      const es = new EventSource(`${apiBase}/ebooks/${book.book_id}/events`);
-      es.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        if (data.type === "status") {
+    const cleanups = processingBooks.map((book) =>
+      streamBookEvents(
+        book.book_id,
+        (status, error) => {
           setBooks((prev) =>
             prev.map((b) =>
               b.book_id === book.book_id
-                ? { ...b, processing_status: data.status, processing_error: data.error }
+                ? { ...b, processing_status: status, processing_error: error }
                 : b
             )
           );
-          if (data.status === "ready" || data.status === "failed") {
-            es.close();
-            fetchBooks();
-          }
-        }
-      };
-      return es;
-    });
+        },
+        fetchBooks
+      )
+    );
 
-    return () => eventSources.forEach((es) => es.close());
-  }, [books, apiBase, fetchBooks]);
+    return () => cleanups.forEach((fn) => fn());
+  }, [books, fetchBooks]);
 
   const sortedBooks = [...books].sort((a, b) => {
     if (sortBy === "title") return a.book_id.localeCompare(b.book_id);
