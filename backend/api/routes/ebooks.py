@@ -5,7 +5,11 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 
-from api.dependencies import get_book_repository, get_retry_ebook_use_case, get_upload_ebook_use_case
+from api.dependencies import (
+	get_book_repository,
+	get_retry_ebook_use_case,
+	get_upload_ebook_use_case,
+)
 from api.schemas.ebooks import EbookListResponse, EbookStatusResponse, EbookUploadResponse
 from core.application.use_cases.process_ebook import (
 	EbookTooLargeError,
@@ -18,7 +22,6 @@ from core.application.use_cases.retry_ebook import (
 	RetryEbookUseCase,
 	RetryResult,
 )
-from core.config import settings
 from db.repositories.postgres_book_repository import PostgresBookRepository
 from db.session import session_factory
 

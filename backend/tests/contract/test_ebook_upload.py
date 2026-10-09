@@ -86,6 +86,7 @@ def test_status_endpoint_includes_processing_error_for_failed_book() -> None:
             "processing_status": "failed",
             "progress_position": 0.25,
             "processing_error": "Parser failed",
+            "cover_path": None,
         },
     )()
     app.dependency_overrides[get_book_repository] = lambda: FakeBookRepository(book)
@@ -116,6 +117,7 @@ def test_status_endpoint_omits_processing_error_for_pending_book() -> None:
             "processing_status": "pending",
             "progress_position": 0.0,
             "processing_error": None,
+            "cover_path": None,
         },
     )()
     app.dependency_overrides[get_book_repository] = lambda: FakeBookRepository(book)

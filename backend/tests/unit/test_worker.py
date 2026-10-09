@@ -53,6 +53,9 @@ def make_ctx(
 				raise parser_error
 			return ["chapter"]
 
+		async def extract_cover(self, storage_path: str):
+			return None
+
 	class FakeStorage:
 		async def delete(self, storage_key):
 			pass
