@@ -39,6 +39,11 @@ async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 		await repository.mark_processing(book_id)
 		try:
 			chapters = await parser.parse(storage_path)
+			cover_content = await parser.extract_cover(storage_path)
+			if cover_content:
+				cover_key = f"{book_id}/cover.jpg"
+				cover_path = await storage.save(cover_key, cover_content)
+				await repository.set_cover_path(book_id, cover_path)
 		except Exception as error:  # noqa: BLE001 - any parse failure must mark the book failed
 			await repository.mark_failed(book_id, str(error))
 			return
@@ -55,12 +60,13 @@ async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 			await extraction.extract_from_chunks(book_id, chunks_with_ids)
 			await repository.mark_ready(book_id)
 			await storage.delete(storage_key)
-			await _enqueue_graph_generation(book_id)
 		except Exception as error:
 			await repository.mark_failed(book_id, str(error))
 			if isinstance(error, (ValueError, EOFError)):
 				return
 			raise
+
+	await _enqueue_graph_generation(book_id)
 
 
 async def _enqueue_graph_generation(book_id: str) -> None:

@@ -1,10 +1,27 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { BookGrid } from "@/components/book-grid";
+
 export default function Home() {
+  const router = useRouter();
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-24">
-      <h1 className="text-4xl font-bold">KOReader Reader</h1>
-      <p className="mt-4 text-lg text-gray-600">
-        Knowledge graph anti-spoiler para ebooks
-      </p>
+    <main className="min-h-screen bg-surface-light px-6 py-8 dark:bg-surface-dark md:px-12 lg:px-16">
+      <div className="mx-auto max-w-7xl">
+        <header className="mb-10">
+          <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100">
+            Library
+          </h1>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+            Continue a story, or add something new.
+          </p>
+        </header>
+
+        <BookGrid
+          onSelectBook={(bookId) => router.push(`/books/${bookId}`)}
+        />
+      </div>
     </main>
   );
 }
