@@ -120,6 +120,31 @@ async def retry_ebook(
 	)
 
 
+@router.get("/{book_id}/position-events")
+async def book_position_events(book_id: str) -> StreamingResponse:
+	from lib.events import subscribe, unsubscribe
+
+	async def event_generator():
+		queue = await subscribe(book_id)
+		try:
+			while True:
+				event = await queue.get()
+				yield f"data: {json.dumps(event)}\n\n"
+		except asyncio.CancelledError:
+			pass
+		finally:
+			unsubscribe(book_id, queue)
+
+	return StreamingResponse(
+		event_generator(),
+		media_type="text/event-stream",
+		headers={
+			"Cache-Control": "no-cache",
+			"Connection": "keep-alive",
+		},
+	)
+
+
 @router.get("/{book_id}/cover")
 async def get_book_cover(
 	book_id: str,

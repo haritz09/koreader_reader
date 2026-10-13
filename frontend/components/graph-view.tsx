@@ -9,7 +9,7 @@ import ReactFlow, {
   type Edge,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { getGraph } from "@/lib/api";
+import { useGraphData } from "@/hooks/use-graph-data";
 import type { GraphNodeResponse } from "@/types/api";
 
 interface GraphViewProps {
@@ -29,57 +29,45 @@ const nodeColors: Record<string, string> = {
 export function GraphView({ bookId }: GraphViewProps) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchGraph = useCallback(async () => {
-    try {
-      setError(null);
-      const data = await getGraph(bookId);
-
-      const flowNodes: Node[] = data.nodes.map((node: GraphNodeResponse) => ({
-        id: node.node_id,
-        position: { x: Math.random() * 400, y: Math.random() * 400 },
-        data: {
-          label: node.label,
-          nodeType: node.node_type,
-          description: node.description,
-          importance: node.importance,
-        },
-        style: {
-          background: nodeColors[node.node_type] || nodeColors.other,
-          color: "#000",
-          border: "none",
-          borderRadius: "8px",
-          padding: "8px 12px",
-          fontSize: "12px",
-          fontWeight: 600,
-        },
-      }));
-
-      const flowEdges: Edge[] = data.edges.map((edge) => ({
-        id: edge.edge_id,
-        source: edge.source_id,
-        target: edge.target_id,
-        label: edge.statement,
-        animated: true,
-        style: { stroke: "#666", strokeWidth: 1.5 },
-        labelStyle: { fontSize: 10, fill: "#666" },
-        labelBgStyle: { fill: "#fff", fillOpacity: 0.8 },
-      }));
-
-      setNodes(flowNodes);
-      setEdges(flowEdges);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al cargar grafo");
-    } finally {
-      setLoading(false);
-    }
-  }, [bookId]);
+  const { graph, loading, error, refetch } = useGraphData(bookId);
 
   useEffect(() => {
-    fetchGraph();
-  }, [fetchGraph]);
+    if (!graph) return;
+
+    const flowNodes: Node[] = graph.nodes.map((node: GraphNodeResponse) => ({
+      id: node.node_id,
+      position: { x: Math.random() * 400, y: Math.random() * 400 },
+      data: {
+        label: node.label,
+        nodeType: node.node_type,
+        description: node.description,
+        importance: node.importance,
+      },
+      style: {
+        background: nodeColors[node.node_type] || nodeColors.other,
+        color: "#000",
+        border: "none",
+        borderRadius: "8px",
+        padding: "8px 12px",
+        fontSize: "12px",
+        fontWeight: 600,
+      },
+    }));
+
+    const flowEdges: Edge[] = graph.edges.map((edge) => ({
+      id: edge.edge_id,
+      source: edge.source_id,
+      target: edge.target_id,
+      label: edge.statement,
+      animated: true,
+      style: { stroke: "#666", strokeWidth: 1.5 },
+      labelStyle: { fontSize: 10, fill: "#666" },
+      labelBgStyle: { fill: "#fff", fillOpacity: 0.8 },
+    }));
+
+    setNodes(flowNodes);
+    setEdges(flowEdges);
+  }, [graph]);
 
   if (loading) {
     return (

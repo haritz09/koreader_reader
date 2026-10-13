@@ -3,6 +3,8 @@
 import logging
 from dataclasses import dataclass
 
+from lib.events import publish
+
 from core.domain.entities.graph import BookGraphState
 from core.domain.errors import BookNotFoundError
 from core.ports.job_queue import GraphGenerationQueue
@@ -43,6 +45,10 @@ class SyncProgressUseCase:
         state = await self._progress_store.get_graph_state(progress.book_id)
         await self._progress_store.update_progress(progress.book_id, position)
         queued = await self._queue_when_advanced(progress.book_id, position, state)
+        await publish(
+            progress.book_id,
+            {"type": "position", "position": position},
+        )
         return SyncResult(
             book_id=progress.book_id,
             position=position,
