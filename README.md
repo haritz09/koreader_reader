@@ -1,26 +1,26 @@
 # KOReader Knowledge Graph
 
-> **Estado: en desarrollo activo.** Backend implementado y funcional con cobertura completa de tests. Frontend en progreso. Integración con LLM pendiente de API key.
+> **Status: active development.** Backend implemented and functional with full test coverage. Frontend in progress. LLM integration pending API key.
 
-## Descripción
+## Description
 
-Aplicación que convierte EPUBs en un grafo de conocimiento anti-spoiler. El grafo se actualiza automáticamente con el progreso de lectura sincronizado desde KOReader, mostrando solo entidades, relaciones y eventos que el lector ya ha alcanzado.
+Application that converts EPUBs into an anti-spoiler knowledge graph. The graph updates automatically with reading progress synced from KOReader, showing only entities, relations, and events the reader has already reached.
 
 ## Stack
 
-| Capa | Tecnología |
-|------|-----------|
+| Layer | Technology |
+|-------|-----------|
 | Backend | FastAPI, SQLAlchemy 2.0 async, Alembic, Pydantic v2 |
 | Frontend | Next.js (App Router), TypeScript, Tailwind CSS, ReactFlow |
 | Queue | ARQ (Redis) |
 | Database | PostgreSQL 16 |
 | Tests | pytest (unit, contract, postgres, e2e), ruff |
 
-## Arquitectura
+## Architecture
 
 ```
 backend/
-├── api/            # HTTP routes, schemas Pydantic, dependencies
+├── api/            # HTTP routes, Pydantic schemas, dependencies
 ├── core/           # Domain entities, ports, application use cases
 ├── adapters/       # LLM, storage, queue implementations
 ├── db/             # SQLAlchemy models, repositories, migrations
@@ -37,45 +37,45 @@ frontend/
 
 ## API Endpoints
 
-| Método | Path | Descripción |
+| Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/v1/ebooks` | Subir EPUB (async, retorna 202) |
-| GET | `/api/v1/ebooks` | Listar libros |
-| GET | `/api/v1/ebooks/{id}` | Estado del libro |
-| GET | `/api/v1/ebooks/{id}/graph` | Grafo anti-spoiler en posición actual |
-| GET | `/api/v1/ebooks/{id}/events` | SSE: estado de procesamiento |
-| GET | `/api/v1/ebooks/{id}/position-events` | SSE: cambio de posición de lectura |
-| GET | `/api/v1/ebooks/{id}/cover` | Portada del libro |
-| POST | `/api/v1/ebooks/{id}/retry` | Reintentar procesamiento (solo failed) |
-| POST | `/api/v1/adapters/koreader/sync` | Sincronizar progreso KOReader |
+| POST | `/api/v1/ebooks` | Upload EPUB (async, returns 202) |
+| GET | `/api/v1/ebooks` | List books |
+| GET | `/api/v1/ebooks/{id}` | Book status |
+| GET | `/api/v1/ebooks/{id}/graph` | Anti-spoiler graph at current position |
+| GET | `/api/v1/ebooks/{id}/events` | SSE: processing status |
+| GET | `/api/v1/ebooks/{id}/position-events` | SSE: reading position change |
+| GET | `/api/v1/ebooks/{id}/cover` | Book cover |
+| POST | `/api/v1/ebooks/{id}/retry` | Retry processing (failed only) |
+| POST | `/api/v1/adapters/koreader/sync` | Sync KOReader progress |
 
-## Decisiones Clave
+## Key Decisions
 
 ### Anti-Spoiler
-- El grafo se deriva por-request desde menciones visibles (`reading_position <= stored_position`)
-- Nunca se materializa un snapshot del grafo completo
-- Labels, descripciones, aliases e importancia se derivan de menciones visibles en `GraphAssemblyService`
-- Reesceder no filtra — el grafo se encoge naturalmente
+- Graph is derived per-request from visible mentions (`reading_position <= stored_position`)
+- Full graph snapshots are never materialized
+- Labels, descriptions, aliases, and importance are derived from visible mentions in `GraphAssemblyService`
+- Rewinding does not filter — the graph shrinks naturally
 
-### Progreso de Lectura
-- KOReader envía POST con hash del documento, progreso float [0,1] y porcentaje
-- El backend resuelve el hash → book_id, actualiza posición y encola regeneración de grafo
-- El cliente recibe SSE con el cambio de posición y refresca el grafo automáticamente
+### Reading Progress
+- KOReader sends POST with document hash, progress float [0,1], and percentage
+- Backend resolves hash → book_id, updates position, and enqueues graph regeneration
+- Client receives SSE with position change and refreshes graph automatically
 
-### Entidad Importance
-- 1=protagonista, 2=secundario, 3=terciario (nullable)
-- Se deriva como `min()` de las menciones visibles — sube con la trama sin spoilers
+### Entity Importance
+- 1=protagonist, 2=secondary, 3=tertiary (nullable)
+- Derived as `min()` of visible mentions — rises with the plot without spoilers
 
-## Ejecución Local
+## Local Execution
 
 ```powershell
-# Stack completo con Docker
+# Full stack with Docker
 docker compose up -d --build
 
-# Tests (desde backend/)
-python -m pytest tests/                    # sin servicios externos
-python -m pytest tests/ -m postgres         # con PostgreSQL
-$env:RUN_E2E="1"; python -m pytest tests/ -m e2e  # e2e con Compose
+# Tests (from backend/)
+python -m pytest tests/                    # without external services
+python -m pytest tests/ -m postgres         # with PostgreSQL
+$env:RUN_E2E="1"; python -m pytest tests/ -m e2e  # e2e with Compose
 
 # Linter
 ruff check .
@@ -83,20 +83,20 @@ ruff check .
 
 ## CI
 
-- **Lint**: ruff en PR y push a main
-- **Unit + Contract**: pytest sin servicios
-- **PostgreSQL**: pytest con PostgreSQL 16
-- **E2E**: solo en main y manual dispatch, construye imagen Compose completo
+- **Lint**: ruff on PR and push to main
+- **Unit + Contract**: pytest without services
+- **PostgreSQL**: pytest with PostgreSQL 16
+- **E2E**: only on main and manual dispatch, builds full Compose image
 
-## Features Pendientes
+## Pending Features
 
-| Issue | Descripción | Estado |
+| Issue | Description | Status |
 |-------|-------------|--------|
-| #12 | Diseño de UI del grafo: layout, colores, animaciones | Open |
-| #6 | Wayfinder: planificación de features futuras | Open |
+| #12 | Graph UI design: layout, colors, animations | Open |
+| #6 | Wayfinder: future feature planning | Open |
 
-## Decisions Pendientes
+## Pending Decisions
 
-- **LLM**: Sin API key configurada por defecto. El stack funciona pero extrae conocimiento vacío cuando no hay key. Configurar `LLM_API_KEY` para extracción real.
-- **Cover extraction**: Implementada en backend (cover_path). Pendiente extracción robusta de portadas de EPUBs reales.
-- **Sync manual desde frontend**: El botón de retry está listo. Pendiente UI para sync manual de posición (input de progreso).
+- **LLM**: No API key configured by default. Stack works but extracts empty knowledge without a key. Set `LLM_API_KEY` for real extraction.
+- **Cover extraction**: Implemented in backend (cover_path). Pending robust cover extraction from real EPUBs.
+- **Manual sync from frontend**: Retry button is ready. Pending UI for manual position sync (progress input).
