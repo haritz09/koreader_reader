@@ -13,6 +13,9 @@ This file records durable project decisions, product choices, and current state.
 - Chunk indices are globally monotonic per book. Chunks target 300-500 tokens with 50-100 tokens of overlap and percentage ranges may overlap.
 - The deliverable is a knowledge graph that a client renders visually, not a question-answering feature.
 - The graph is refreshed by reading progress. When a KOReader sync advances the stored position, the client refetches the graph and sees newly visible knowledge. A sync that finds no new data changes nothing.
+- `api/dependencies.py` is the composition root. Every provider returns a port (`LibraryRepository`, `BookRepository`, `TokenService`, `EbookStorage`, ...) and builds the concrete adapter internally, so routers, use-case providers, and `get_current_owner` depend on ports only. The wiring module is the single place that names Postgres or a provider-specific adapter.
+- A read that is repeated on a long-lived session must be refresh-safe. SQLAlchemy's identity map replays the entity it loaded first, so `PostgresLibraryRepository` reads set `populate_existing`; otherwise the processing-status stream would never observe a status the worker committed after the first poll.
+- An endpoint that streams cannot reuse a request-scoped repository: FastAPI tears a dependency with `yield` down before the response body is sent. Such endpoints take `LibraryRepositoryFactory` and open their own session, so the port keeps the route free of persistence knowledge while the resource lives as long as the stream.
 
 ## Graph Generation Decision
 
@@ -35,11 +38,28 @@ This file records durable project decisions, product choices, and current state.
 - `ReadingPosition` in `core/domain/value_objects/` is the single definition of a valid position: finite, numeric, and within `[0.0, 1.0]`. Every repository query validates through it before building SQL, and `CHECK` constraints enforce the same range in the database for `entities`, `facts`, `events`, `locations`, and `books.progress_position`.
 - Before this, the repository accepted any `float`, so a position above `1.0` returned the whole book. The value object plus the constraints are what make the boundary fail closed.
 
+## Multi-User Ownership Decision
+
+- The app is usable without a login. `POST /api/v1/session` mints an anonymous `users` row and returns a JWT; the browser stores it in an httpOnly cookie, and any client without a browser (for example KOReader) sends the same token as `Authorization: Bearer`. `GET /api/v1/session` reports the current identity and never creates one.
+- The owner id is never accepted from the client. `get_current_owner` reads the cookie or bearer header, verifies the signature, and takes the id from the signed `sub` claim. That is what makes an owner header IDOR-safe: there is no client-supplied owner field to forge, only a token the server signed.
+- "Anonymous" describes the row, not the transport. A later login claims the same `users` row, so no library data is migrated.
+- Ownership lives in `user_books(owner_id, book_id, added_at, deleted_at)`, not on `books`. Book content stays shared: `books.document_hash` remains globally unique, so the same EPUB is parsed and its knowledge extracted (and paid for) once no matter how many owners add it. Verified by `test_a_shared_book_keeps_one_content_row_for_two_owners`.
+- Deleting a book is a full soft-delete: only `user_books.deleted_at` is set. The book row, chapters, chunks, entities, facts, events, locations, and the cover are never touched, so the book can be restored. `DELETE /api/v1/ebooks/{book_id}` returns 204, 409 while `processing_status == "processing"`, and 404 for an unknown or unowned book so deletion never discloses another owner's library.
+- Re-uploading a previously deleted EPUB restores the same `book_id` because the content row was never removed; `link` clears `deleted_at` on conflict.
+- Nothing is purged yet. The eventual hard purge (content plus cover) runs only when no active owner references the book and a retention window has elapsed; that job does not exist. `user_books` carries `ON DELETE CASCADE` to both `users` and `books` as the safety net for it.
+- Re-uploading a `failed` book resets it in place (`mark_pending` plus re-enqueue) instead of deleting and recreating it. The delete-and-create path was what made one upload look like it removed other books.
+- `PostgresBookRepository.replace_derived_content` deletes knowledge rows before chunks and chapters, because knowledge references chunks. Without it, reprocessing the same `book_id` fails on the foreign key.
+- Progress stays on `books.progress_position` for now. Per-owner progress in `user_books` is an intentional later refactor, so the anti-spoiler read filter is unchanged here.
+- CORS uses explicit `cors_origins` because a credentialed request cannot be answered with `Access-Control-Allow-Origin: *`; the session travels in a cookie.
+- `JWT_SECRET` must be set to a stable value of at least 32 bytes outside local development, or every issued session invalidates on restart and PyJWT warns that the HMAC key is too short. `SESSION_COOKIE_SECURE` stays `false` only for local HTTP; over HTTPS it must be `true`. Both are listed in `backend/.env.example`.
+- `tests/conftest.py` authenticates every test as a fixed owner through an autouse `get_current_owner` override, and seeds that owner row so the `user_books` foreign key holds. The `e2e` tier instead creates a real session, because the container runs the real dependency.
+
 ## KOReader Integration Decision
 
 - KOReader will synchronize through its native Kosync HTTP API.
 - KOReader sends a POST containing `document` (the EPUB hash), `progress` (a float from `0.0` to `1.0`), `percentage` (an integer from `0` to `100`), and `device`.
 - The endpoint is versioned at `/api/v1/adapters/koreader/sync`.
+- Synchronization needs no login but does need an owner: KOReader sends the session token from `POST /api/v1/session` as `Authorization: Bearer`. The sync then resolves the Kosync `document` hash to the internal `book_id` and verifies the caller owns that book, so a known hash cannot write into another owner's library.
 - The adapter resolves the Kosync `document` hash to the internal `book_id`, then passes normalized progress to the provider-agnostic application service.
 
 ## Continuous Integration
@@ -67,9 +87,11 @@ This file records durable project decisions, product choices, and current state.
 
 ## Current State
 
-- The versioned KOReader sync endpoint, ebook upload endpoint, and graph endpoint are implemented with unit, contract, postgres, and e2e coverage.
+- The versioned KOReader sync endpoint, ebook upload endpoint, graph endpoint, anonymous session endpoint, and library delete endpoint are implemented with unit, contract, postgres, and e2e coverage.
 - The upload pipeline has local storage, ARQ queue and worker boundaries, EPUB parsing, chunk persistence, processing status, and a book status endpoint.
 - Docker configuration is available for the API, ARQ worker, PostgreSQL, and Redis services.
 - Entity resolution runs in the background after extraction and on forward progress sync. The graph endpoint is registered at `/api/v1/ebooks/{book_id}/graph`.
-- The frontend directory is still empty and intentionally out of scope until the API contract settles.
+- The Next.js client in `frontend/` renders the library grid and the knowledge graph. All API calls go through `frontend/lib/api.ts`, which bootstraps the anonymous session and retries once on 401; components only render.
+- The library is per-owner and soft-deleted: `GET /api/v1/ebooks` lists only the caller's live books, and `DELETE /api/v1/ebooks/{book_id}` marks the membership deleted without removing content, so a re-upload restores the same `book_id`.
 - `locations` and `events` are read by the graph path: `PostgresGraphRepository.get_visible_mentions` unions `EntityRecord`, `LocationRecord`, and `EventRecord` through the same position filter, so a place or an event becomes a node as soon as it is visible.
+- `GET /api/v1/ebooks/{book_id}/events` streams the processing status to the library grid until it reaches `ready` or `failed`. It opens its own session through `LibraryRepositoryFactory` and reports every status change, including one that happens after the first poll.

@@ -58,3 +58,12 @@ export interface KoreaderSyncResponse {
   graph_revision: number;
   graph_generation_queued: boolean;
 }
+
+export interface SessionResponse {
+  user_id: string;
+  is_anonymous: boolean;
+}
+
+export interface SessionCreatedResponse extends SessionResponse {
+  token: string;
+}

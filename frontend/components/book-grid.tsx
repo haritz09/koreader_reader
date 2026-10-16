@@ -136,6 +136,7 @@ export function BookGrid({ onSelectBook }: BookGridProps) {
             book={book}
             onSelect={onSelectBook}
             onRetry={fetchBooks}
+            onDelete={fetchBooks}
             index={i}
           />
         ))}

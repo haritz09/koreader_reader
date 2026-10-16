@@ -1,20 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import { retryEbook } from "@/lib/api";
+import { deleteEbook, retryEbook } from "@/lib/api";
 import type { EbookStatusResponse } from "@/types/api";
 
 interface BookCardProps {
   book: EbookStatusResponse;
   onSelect: (bookId: string) => void;
   onRetry: (bookId: string) => void;
+  onDelete: () => void;
   index?: number;
 }
 
-export function BookCard({ book, onSelect, onRetry, index = 0 }: BookCardProps) {
+export function BookCard({
+  book,
+  onSelect,
+  onRetry,
+  onDelete,
+  index = 0,
+}: BookCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const progressPercent = Math.round(book.progress_position * 100);
+  const isProcessing = book.processing_status === "processing";
 
   const statusLabel =
     book.processing_status === "ready"
@@ -35,6 +44,20 @@ export function BookCard({ book, onSelect, onRetry, index = 0 }: BookCardProps) 
       console.error("Retry failed:", err);
     } finally {
       setRetrying(false);
+    }
+  };
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeleting(true);
+    try {
+      await deleteEbook(book.book_id);
+      onDelete();
+    } catch (err) {
+      console.error("Delete failed:", err);
+    } finally {
+      setDeleting(false);
+      setMenuOpen(false);
     }
   };
 
@@ -84,8 +107,17 @@ export function BookCard({ book, onSelect, onRetry, index = 0 }: BookCardProps) 
         </button>
         {menuOpen && (
           <div className="absolute right-2 top-10 z-10 rounded-md bg-white py-1 shadow-lg ring-1 ring-black/5 dark:bg-gray-800 dark:ring-white/10">
-            <button className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
-              Eliminar
+            <button
+              onClick={handleDelete}
+              disabled={deleting || isProcessing}
+              title={
+                isProcessing
+                  ? "No se puede eliminar mientras se procesa"
+                  : undefined
+              }
+              className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              {deleting ? "Eliminando..." : "Eliminar"}
             </button>
           </div>
         )}

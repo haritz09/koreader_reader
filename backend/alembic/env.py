@@ -12,6 +12,8 @@ from db.models.book import Book
 from db.models.chapter import ChapterRecord
 from db.models.chunk import ChunkRecord
 from db.models.knowledge import EntityRecord, EventRecord, FactRecord, LocationRecord
+from db.models.user import UserRecord
+from db.models.user_book import UserBookRecord
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

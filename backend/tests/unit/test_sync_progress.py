@@ -43,6 +43,16 @@ class RecordingGraphQueue:
         self.enqueued.append(book_id)
 
 
+class StubLibrary:
+    """Reports whether the caller owns the resolved book."""
+
+    def __init__(self, owned: bool = True) -> None:
+        self._owned = owned
+
+    async def get_book(self, owner_id: str, book_id: str):
+        return object() if self._owned else None
+
+
 class FailingGraphQueue:
     async def enqueue(self, book_id: str) -> None:
         raise RuntimeError("redis unavailable")
@@ -66,9 +76,12 @@ def sync(
     queue=None,
     position: float = 0.5,
     document_hash: str = "document-hash",
+    library: StubLibrary | None = None,
 ):
-    use_case = SyncProgressUseCase(StubProgressProvider(), store, queue)
-    return asyncio.run(use_case.execute(document_hash, position))
+    use_case = SyncProgressUseCase(
+        StubProgressProvider(), store, library or StubLibrary(), queue
+    )
+    return asyncio.run(use_case.execute(document_hash, position, "owner-1"))
 
 
 def test_moving_forward_queues_graph_generation() -> None:
@@ -146,6 +159,15 @@ def test_an_unknown_document_is_rejected_before_storing_progress() -> None:
 
     with pytest.raises(DomainBookNotFoundError):
         sync(store, RecordingGraphQueue(), document_hash="unknown")
+
+    assert store.updates == []
+
+
+def test_a_book_the_caller_does_not_own_is_rejected() -> None:
+    store = StubProgressStore(state(0.1))
+
+    with pytest.raises(DomainBookNotFoundError):
+        sync(store, RecordingGraphQueue(), library=StubLibrary(owned=False))
 
     assert store.updates == []
 

@@ -3,6 +3,7 @@ import type {
   EbookStatusResponse,
   GraphResponse,
   KoreaderSyncResponse,
+  SessionResponse,
 } from "@/types/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
@@ -12,15 +13,62 @@ async function parseError(res: Response): Promise<string> {
   return error.detail || `Request failed: ${res.status}`;
 }
 
+// The session lives in an httpOnly cookie, so the browser cannot read it and
+// the app cannot know whether one exists. It is created once and reused.
+let sessionPromise: Promise<void> | null = null;
+
+async function bootstrapSession(): Promise<void> {
+  const current = await fetch(`${API_BASE}/session`, { credentials: "include" });
+  if (current.ok) return;
+
+  const created = await fetch(`${API_BASE}/session`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!created.ok) throw new Error(await parseError(created));
+}
+
+export function ensureSession(): Promise<void> {
+  if (!sessionPromise) {
+    sessionPromise = bootstrapSession().catch((error) => {
+      sessionPromise = null;
+      throw error;
+    });
+  }
+  return sessionPromise;
+}
+
+async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const send = () =>
+    fetch(`${API_BASE}${path}`, { ...init, credentials: "include" });
+
+  let response = await send();
+  if (response.status === 401) {
+    sessionPromise = null;
+    await ensureSession();
+    response = await send();
+  }
+  return response;
+}
+
+export async function getSession(): Promise<SessionResponse> {
+  const res = await authFetch("/session");
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export async function uploadEbook(
   file: File,
   onProgress?: (percent: number) => void
 ): Promise<{ book_id: string; document_hash: string; processing_status: string }> {
+  await ensureSession();
+
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const formData = new FormData();
     formData.append("file", file);
 
+    xhr.withCredentials = true;
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable && onProgress) {
         onProgress(Math.round((e.loaded / e.total) * 100));
@@ -47,19 +95,19 @@ export async function uploadEbook(
 }
 
 export async function getBooks(): Promise<EbookListResponse> {
-  const res = await fetch(`${API_BASE}/ebooks`);
+  const res = await authFetch("/ebooks");
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }
 
 export async function getEbookStatus(bookId: string): Promise<EbookStatusResponse> {
-  const res = await fetch(`${API_BASE}/ebooks/${bookId}`);
+  const res = await authFetch(`/ebooks/${bookId}`);
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }
 
 export async function getGraph(bookId: string): Promise<GraphResponse> {
-  const res = await fetch(`${API_BASE}/ebooks/${bookId}/graph`);
+  const res = await authFetch(`/ebooks/${bookId}/graph`);
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }
@@ -69,7 +117,9 @@ export function streamBookEvents(
   onStatus: (status: string, error: string | null) => void,
   onDone: () => void
 ): () => void {
-  const es = new EventSource(`${API_BASE}/ebooks/${bookId}/events`);
+  const es = new EventSource(`${API_BASE}/ebooks/${bookId}/events`, {
+    withCredentials: true,
+  });
 
   es.onmessage = (e) => {
     const data = JSON.parse(e.data);
@@ -91,7 +141,7 @@ export async function syncProgress(data: {
   percentage: number;
   device: string;
 }): Promise<KoreaderSyncResponse> {
-  const res = await fetch(`${API_BASE}/adapters/koreader/sync`, {
+  const res = await authFetch("/adapters/koreader/sync", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -101,9 +151,12 @@ export async function syncProgress(data: {
 }
 
 export async function retryEbook(bookId: string): Promise<{ book_id: string; processing_status: string }> {
-  const res = await fetch(`${API_BASE}/ebooks/${bookId}/retry`, {
-    method: "POST",
-  });
+  const res = await authFetch(`/ebooks/${bookId}/retry`, { method: "POST" });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
+}
+
+export async function deleteEbook(bookId: string): Promise<void> {
+  const res = await authFetch(`/ebooks/${bookId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await parseError(res));
 }

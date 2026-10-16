@@ -7,9 +7,16 @@ that is covered by ``test_graph_postgres.py``.
 
 from fastapi.testclient import TestClient
 
-from api.dependencies import get_book_repository, get_graph_repository
+from api.dependencies import get_book_repository, get_graph_repository, get_library_repository
 from core.domain.entities.graph import BookGraphState, EntityMention, FactLink
 from main import app
+
+
+class StubLibraryRepository:
+    """Marks every known book as owned by the caller."""
+
+    async def get_book(self, owner_id: str, book_id: str):
+        return object() if book_id == "book-123" else None
 
 
 class StubBookRepository:
@@ -107,6 +114,7 @@ class FilteringGraphRepository:
 def get_client(book_repository: StubBookRepository) -> TestClient:
     app.dependency_overrides[get_book_repository] = lambda: book_repository
     app.dependency_overrides[get_graph_repository] = lambda: FilteringGraphRepository()
+    app.dependency_overrides[get_library_repository] = lambda: StubLibraryRepository()
     return TestClient(app)
 
 

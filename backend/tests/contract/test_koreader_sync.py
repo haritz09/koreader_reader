@@ -5,6 +5,7 @@ from api.dependencies import (
 	get_book_repository,
 	get_graph_generation_queue,
 	get_koreader_progress_adapter,
+	get_library_repository,
 )
 from core.domain.entities.graph import BookGraphState
 from main import app
@@ -16,6 +17,14 @@ class RecordingGraphQueue:
 
     async def enqueue(self, book_id: str) -> None:
         self.enqueued.append(book_id)
+
+
+class InMemoryLibraryRepository:
+    def __init__(self, book_ids: set[str]) -> None:
+        self._book_ids = book_ids
+
+    async def get_book(self, owner_id: str, book_id: str):
+        return object() if book_id in self._book_ids else None
 
 
 class InMemoryBookRepository:
@@ -51,6 +60,9 @@ def client_for_books(books: dict[str, str], **kwargs) -> TestClient:
     app.dependency_overrides[get_book_repository] = lambda: repository
     app.dependency_overrides[get_koreader_progress_adapter] = lambda: (
         KoreaderProgressAdapter(repository)
+    )
+    app.dependency_overrides[get_library_repository] = lambda: InMemoryLibraryRepository(
+        set(books.values())
     )
     app.dependency_overrides[get_graph_generation_queue] = lambda: RecordingGraphQueue()
     return TestClient(app)

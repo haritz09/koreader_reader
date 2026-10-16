@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from api.dependencies import get_sync_progress_use_case
+from api.dependencies import get_current_owner, get_sync_progress_use_case
 from api.schemas.progress import KoreaderSyncRequest, KoreaderSyncResponse
 from core.application.use_cases.sync_progress import SyncProgressUseCase
 from core.domain.errors import BookNotFoundError
@@ -17,10 +17,11 @@ router = APIRouter(prefix="/adapters/koreader", tags=["koreader"])
 )
 async def sync_koreader_progress(
 	payload: KoreaderSyncRequest,
+	owner_id: str = Depends(get_current_owner),
 	use_case: SyncProgressUseCase = Depends(get_sync_progress_use_case),
 ) -> KoreaderSyncResponse:
 	try:
-		result = await use_case.execute(payload.document, payload.progress)
+		result = await use_case.execute(payload.document, payload.progress, owner_id)
 	except BookNotFoundError as error:
 		raise HTTPException(
 			status_code=status.HTTP_404_NOT_FOUND,

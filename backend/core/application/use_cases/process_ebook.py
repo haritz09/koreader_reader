@@ -1,4 +1,4 @@
-"""Use case for accepting an ebook upload."""
+"""Use case for accepting an ebook upload into an owner's library."""
 
 import hashlib
 import io
@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from core.ports.book_repository import BookRepository
 from core.ports.ebook_storage import EbookStorage
 from core.ports.job_queue import EbookProcessingQueue
+from core.ports.library_repository import LibraryRepository
 
 
 class InvalidEbookError(Exception):
@@ -32,14 +33,16 @@ class UploadEbookUseCase:
 		repository: BookRepository,
 		storage: EbookStorage,
 		queue: EbookProcessingQueue,
+		library: LibraryRepository,
 		max_size_bytes: int = 10 * 1024 * 1024,
 	):
 		self._repository = repository
 		self._storage = storage
 		self._queue = queue
+		self._library = library
 		self._max_size_bytes = max_size_bytes
 
-	async def execute(self, content: bytes) -> EbookUploadResult:
+	async def execute(self, content: bytes, owner_id: str) -> EbookUploadResult:
 		if len(content) > self._max_size_bytes:
 			raise EbookTooLargeError(
 				f"Ebook exceeds the maximum size of {self._max_size_bytes} bytes"
@@ -51,19 +54,29 @@ class UploadEbookUseCase:
 		document_hash = hashlib.md5(content).hexdigest()
 		existing = await self._repository.get_by_document_hash(document_hash)
 		if existing is not None:
+			# The content is shared, so the same book is added back to the
+			# library under the same identity instead of being recreated.
+			await self._library.link(owner_id, existing.id)
 			if existing.processing_status == "failed":
-				await self._repository.delete(existing.id)
-			else:
+				await self._storage.save(existing.storage_key, content)
+				await self._repository.mark_pending(existing.id)
+				await self._queue.enqueue(existing.id, existing.storage_key)
 				return EbookUploadResult(
 					book_id=existing.id,
 					document_hash=existing.document_hash,
-					processing_status=existing.processing_status,
+					processing_status="pending",
 				)
+			return EbookUploadResult(
+				book_id=existing.id,
+				document_hash=existing.document_hash,
+				processing_status=existing.processing_status,
+			)
 
 		book_id = str(uuid.uuid4())
 		storage_key = f"books/{book_id}.epub"
 		await self._storage.save(storage_key, content)
 		book = await self._repository.create(book_id, document_hash, storage_key)
+		await self._library.link(owner_id, book.id)
 		await self._queue.enqueue(book.id, book.storage_key)
 		return EbookUploadResult(
 			book_id=book.id,
