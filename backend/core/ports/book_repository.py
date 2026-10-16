@@ -29,6 +29,9 @@ class BookRepository(Protocol):
     async def mark_processing(self, book_id: str) -> None:
         ...
 
+    async def mark_pending(self, book_id: str) -> None:
+        ...
+
     async def replace_derived_content(
         self,
         book_id: str,
@@ -50,9 +53,6 @@ class BookRepository(Protocol):
         ...
 
     async def bump_graph_revision(self, book_id: str) -> int:
-        ...
-
-    async def list_all(self) -> list[Any]:
         ...
 
     async def set_cover_path(self, book_id: str, cover_path: str) -> None:

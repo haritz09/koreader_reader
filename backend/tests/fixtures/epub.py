@@ -2,7 +2,7 @@ import io
 import zipfile
 
 
-def valid_epub_bytes() -> bytes:
+def valid_epub_bytes(identifier: str = "test-book") -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr(
@@ -21,11 +21,11 @@ def valid_epub_bytes() -> bytes:
         )
         archive.writestr(
             "OEBPS/content.opf",
-            """<?xml version="1.0" encoding="UTF-8"?>
+            f"""<?xml version="1.0" encoding="UTF-8"?>
 <package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:identifier id="book-id">test-book</dc:identifier>
-    <dc:title>Test Book</dc:title>
+    <dc:identifier id="book-id">{identifier}</dc:identifier>
+    <dc:title>Test Book {identifier}</dc:title>
     <dc:language>en</dc:language>
   </metadata>
   <manifest>

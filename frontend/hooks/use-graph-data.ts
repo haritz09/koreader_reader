@@ -22,17 +22,31 @@ export function useGraphData(bookId: string) {
   }, [bookId]);
 
   useEffect(() => {
-    setLoading(true);
-    fetchGraph();
+    let cancelled = false;
+    let stream: EventSource | null = null;
     const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-    const es = new EventSource(`${apiBase}/ebooks/${bookId}/position-events`);
-    es.onmessage = (e) => {
-      const data = JSON.parse(e.data);
-      if (data.type === "position") {
-        fetchGraph();
-      }
+
+    // The first fetch establishes the session cookie, so the stream opens after.
+    const start = async () => {
+      setLoading(true);
+      await fetchGraph();
+      if (cancelled) return;
+      stream = new EventSource(`${apiBase}/ebooks/${bookId}/position-events`, {
+        withCredentials: true,
+      });
+      stream.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.type === "position") {
+          fetchGraph();
+        }
+      };
     };
-    return () => es.close();
+
+    start();
+    return () => {
+      cancelled = true;
+      stream?.close();
+    };
   }, [fetchGraph, bookId]);
 
   return { graph, loading, error, refetch: fetchGraph };

@@ -15,6 +15,7 @@ class FakeBookRepository:
     def __init__(self, existing=None) -> None:
         self.existing = existing
         self.created = None
+        self.pending: list[str] = []
 
     async def get_by_document_hash(self, document_hash: str):
         return self.existing
@@ -31,6 +32,17 @@ class FakeBookRepository:
             },
         )()
         return self.created
+
+    async def mark_pending(self, book_id: str) -> None:
+        self.pending.append(book_id)
+
+
+class FakeLibraryRepository:
+    def __init__(self) -> None:
+        self.linked: list[tuple[str, str]] = []
+
+    async def link(self, owner_id: str, book_id: str) -> None:
+        self.linked.append((owner_id, book_id))
 
 
 class FakeStorage:
@@ -58,15 +70,17 @@ def test_upload_stores_md5_and_enqueues_processing() -> None:
     repository = FakeBookRepository()
     storage = FakeStorage()
     queue = FakeQueue()
-    use_case = UploadEbookUseCase(repository, storage, queue)
+    library = FakeLibraryRepository()
+    use_case = UploadEbookUseCase(repository, storage, queue, library)
 
-    result = asyncio.run(use_case.execute(content))
+    result = asyncio.run(use_case.execute(content, "owner-1"))
 
     assert result.document_hash == hashlib.md5(content).hexdigest()
     assert result.processing_status == "pending"
     assert repository.created.document_hash == result.document_hash
     assert storage.saved == (f"books/{result.book_id}.epub", content)
     assert queue.enqueued == (result.book_id, repository.created.storage_key)
+    assert library.linked == [("owner-1", result.book_id)]
 
 
 def test_upload_reuses_existing_book_without_reprocessing() -> None:
@@ -76,35 +90,70 @@ def test_upload_reuses_existing_book_without_reprocessing() -> None:
         {
             "id": "existing-book",
             "document_hash": "known-hash",
+            "storage_key": "books/existing-book.epub",
             "processing_status": "ready",
         },
     )()
     repository = FakeBookRepository(existing)
     storage = FakeStorage()
     queue = FakeQueue()
-    use_case = UploadEbookUseCase(repository, storage, queue)
+    library = FakeLibraryRepository()
+    use_case = UploadEbookUseCase(repository, storage, queue, library)
 
     content = valid_epub_bytes()
     repository.existing.document_hash = hashlib.md5(content).hexdigest()
-    result = asyncio.run(use_case.execute(content))
+    result = asyncio.run(use_case.execute(content, "owner-1"))
 
     assert result.book_id == "existing-book"
     assert storage.saved is None
     assert queue.enqueued is None
+    assert library.linked == [("owner-1", "existing-book")]
+
+
+def test_reuploading_a_failed_book_reprocesses_it_in_place() -> None:
+    existing = type(
+        "Book",
+        (),
+        {
+            "id": "existing-book",
+            "document_hash": "known-hash",
+            "storage_key": "books/existing-book.epub",
+            "processing_status": "failed",
+        },
+    )()
+    repository = FakeBookRepository(existing)
+    storage = FakeStorage()
+    queue = FakeQueue()
+    library = FakeLibraryRepository()
+    use_case = UploadEbookUseCase(repository, storage, queue, library)
+
+    content = valid_epub_bytes()
+    repository.existing.document_hash = hashlib.md5(content).hexdigest()
+    result = asyncio.run(use_case.execute(content, "owner-1"))
+
+    assert result.book_id == "existing-book"
+    assert result.processing_status == "pending"
+    assert repository.pending == ["existing-book"]
+    assert queue.enqueued == ("existing-book", "books/existing-book.epub")
+    assert library.linked == [("owner-1", "existing-book")]
 
 
 def test_upload_rejects_non_epub_content() -> None:
-    use_case = UploadEbookUseCase(FakeBookRepository(), FakeStorage(), FakeQueue())
+    use_case = UploadEbookUseCase(
+        FakeBookRepository(), FakeStorage(), FakeQueue(), FakeLibraryRepository()
+    )
 
     with pytest.raises(InvalidEbookError):
-        asyncio.run(use_case.execute(b"not an epub"))
+        asyncio.run(use_case.execute(b"not an epub", "owner-1"))
 
 
 def test_upload_rejects_structurally_invalid_epub_archive() -> None:
-    use_case = UploadEbookUseCase(FakeBookRepository(), FakeStorage(), FakeQueue())
+    use_case = UploadEbookUseCase(
+        FakeBookRepository(), FakeStorage(), FakeQueue(), FakeLibraryRepository()
+    )
 
     with pytest.raises(InvalidEbookError):
-        asyncio.run(use_case.execute(b"PK\x03\x04"))
+        asyncio.run(use_case.execute(b"PK\x03\x04", "owner-1"))
 
 
 def test_upload_rejects_content_above_configured_limit() -> None:
@@ -113,8 +162,9 @@ def test_upload_rejects_content_above_configured_limit() -> None:
         FakeBookRepository(),
         FakeStorage(),
         FakeQueue(),
+        FakeLibraryRepository(),
         max_size_bytes=len(content) - 1,
     )
 
     with pytest.raises(EbookTooLargeError):
-        asyncio.run(use_case.execute(content))
+        asyncio.run(use_case.execute(content, "owner-1"))

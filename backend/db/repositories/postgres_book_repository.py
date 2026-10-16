@@ -61,12 +61,25 @@ class PostgresBookRepository:
 		book.processing_error = None
 		await self._session.commit()
 
+	async def mark_pending(self, book_id: str) -> None:
+		book = await self.get_by_id(book_id)
+		if book is None:
+			return
+		book.processing_status = "pending"
+		book.processing_error = None
+		await self._session.commit()
+
 	async def replace_derived_content(
 		self,
 		book_id: str,
 		chapters: list,
 		chunks: list,
 	) -> None:
+		# Knowledge rows reference chunks, so they must go first.
+		for table in (EntityRecord, FactRecord, EventRecord, LocationRecord):
+			await self._session.execute(
+				table.__table__.delete().where(table.book_id == book_id)
+			)
 		await self._session.execute(
 			ChunkRecord.__table__.delete().where(ChunkRecord.book_id == book_id)
 		)
@@ -149,10 +162,6 @@ class PostgresBookRepository:
 		await self._session.commit()
 		return revision or 0
 
-	async def list_all(self) -> list[Book]:
-		result = await self._session.execute(select(Book))
-		return list(result.scalars().all())
-
 	async def set_cover_path(self, book_id: str, cover_path: str) -> None:
 		book = await self.get_by_id(book_id)
 		if book is None:
@@ -161,6 +170,12 @@ class PostgresBookRepository:
 		await self._session.commit()
 
 	async def delete(self, book_id: str) -> None:
+		"""Hard-delete a book and its derived content.
+
+		Reserved for the future purge that runs once no active owner references
+		the book. Owner-facing removal is a soft delete on ``user_books`` and
+		must not call this.
+		"""
 		for table in (EntityRecord, FactRecord, EventRecord, LocationRecord, ChunkRecord, ChapterRecord):
 			await self._session.execute(
 				table.__table__.delete().where(table.book_id == book_id)

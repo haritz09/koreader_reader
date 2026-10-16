@@ -8,6 +8,7 @@ from lib.events import publish
 from core.domain.entities.graph import BookGraphState
 from core.domain.errors import BookNotFoundError
 from core.ports.job_queue import GraphGenerationQueue
+from core.ports.library_repository import LibraryRepository
 from core.ports.reading_progress_provider import ReadingProgressProvider
 from core.ports.reading_progress_store import ReadingProgressStore
 
@@ -31,15 +32,24 @@ class SyncProgressUseCase:
         self,
         provider: ReadingProgressProvider,
         progress_store: ReadingProgressStore,
+        library: LibraryRepository,
         graph_queue: GraphGenerationQueue | None = None,
     ) -> None:
         self._provider = provider
         self._progress_store = progress_store
+        self._library = library
         self._graph_queue = graph_queue
 
-    async def execute(self, document_hash: str, position: float) -> SyncResult:
+    async def execute(
+        self, document_hash: str, position: float, owner_id: str
+    ) -> SyncResult:
         progress = await self._provider.resolve_progress(document_hash, position)
         if progress is None:
+            raise BookNotFoundError(document_hash)
+
+        # A known document is not enough: the caller must own the book, so a
+        # token cannot write progress into someone else's library.
+        if await self._library.get_book(owner_id, progress.book_id) is None:
             raise BookNotFoundError(document_hash)
 
         state = await self._progress_store.get_graph_state(progress.book_id)

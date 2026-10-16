@@ -39,9 +39,12 @@ frontend/
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/v1/ebooks` | Upload EPUB (async, returns 202) |
-| GET | `/api/v1/ebooks` | List books |
+| POST | `/api/v1/session` | Start an anonymous session (sets httpOnly cookie, returns a bearer token) |
+| GET | `/api/v1/session` | Current identity and whether it is anonymous |
+| POST | `/api/v1/ebooks` | Upload EPUB to the caller's library (async, returns 202) |
+| GET | `/api/v1/ebooks` | List the caller's books |
 | GET | `/api/v1/ebooks/{id}` | Book status |
+| DELETE | `/api/v1/ebooks/{id}` | Remove a book from the caller's library (204; 409 while processing) |
 | GET | `/api/v1/ebooks/{id}/graph` | Anti-spoiler graph at current position |
 | GET | `/api/v1/ebooks/{id}/events` | SSE: processing status |
 | GET | `/api/v1/ebooks/{id}/position-events` | SSE: reading position change |
@@ -49,7 +52,14 @@ frontend/
 | POST | `/api/v1/ebooks/{id}/retry` | Retry processing (failed only) |
 | POST | `/api/v1/adapters/koreader/sync` | Sync KOReader progress |
 
+Every `/ebooks` and `/adapters` route requires a session. The browser sends the
+httpOnly cookie; a device without a browser, such as KOReader, sends the token as
+`Authorization: Bearer <token>`.
+
 ## Key Decisions
+
+### Identity and Library
+- No login required. `POST /api/v1/session` creates an anonymous owner and returns a JWT; a later login claims the same row, so nothing is migrated.
 
 ### Anti-Spoiler
 - Graph is derived per-request from visible mentions (`reading_position <= stored_position`)
