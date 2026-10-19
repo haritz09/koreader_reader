@@ -66,7 +66,7 @@ def _worker_stopped() -> Iterator[None]:
 
 
 @contextmanager
-def _quiesced_database(enabled: bool) -> Iterator[None]:
+def _quiesced_database(enabled: bool) -> Generator[None, None, None]:
     if not enabled:
         yield
         return
