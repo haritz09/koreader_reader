@@ -6,12 +6,6 @@ import jwt
 
 
 class JwtTokenService:
-    """Signs an opaque owner reference into a verifiable bearer token.
-
-    The owner id never comes from the client: it is derived from the signed
-    ``sub`` claim, so a caller cannot address another owner's library.
-    """
-
     def __init__(
         self, secret: str, algorithm: str = "HS256", ttl_days: int = 365
     ) -> None:
