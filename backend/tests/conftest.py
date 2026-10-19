@@ -1,7 +1,8 @@
 import asyncio
 import os
-import time
-from collections.abc import Generator
+import subprocess
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 
 import psycopg
 import pytest
@@ -20,33 +21,77 @@ def _sync_database_url() -> str:
     return settings.database_url.replace("+psycopg", "")
 
 
-TRUNCATE_ATTEMPTS = 5
-TRUNCATE_RETRY_SECONDS = 0.2
+WORKER_SERVICE = "worker"
+REDIS_SERVICE = "redis"
+COMPOSE_TIMEOUT_SECONDS = 120
+WORKER_STOP_TIMEOUT_SECONDS = 1
+TRUNCATE_LOCK_TIMEOUT = "10s"
+
+_container_ids: dict[str, str] = {}
+
+
+def _run(*command: str) -> str:
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=COMPOSE_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            " ".join(command) + " failed: " + result.stderr.strip()
+        )
+    return result.stdout.strip()
+
+
+def _container_id(service: str) -> str:
+    if service not in _container_ids:
+        container_id = _run("docker", "compose", "ps", "-q", service)
+        if not container_id:
+            raise RuntimeError(f"the {service} container is not running")
+        _container_ids[service] = container_id
+    return _container_ids[service]
+
+
+@contextmanager
+def _worker_stopped() -> Iterator[None]:
+    worker = _container_id(WORKER_SERVICE)
+    redis = _container_id(REDIS_SERVICE)
+    _run("docker", "stop", "-t", str(WORKER_STOP_TIMEOUT_SECONDS), worker)
+    try:
+        _run("docker", "exec", redis, "redis-cli", "FLUSHDB")
+        yield
+    finally:
+        _run("docker", "start", worker)
+
+
+@contextmanager
+def _quiesced_database(enabled: bool) -> Iterator[None]:
+    if not enabled:
+        yield
+        return
+    with _worker_stopped():
+        yield
+
+
+def _is_e2e(request: pytest.FixtureRequest) -> bool:
+    return (
+        os.getenv("RUN_E2E") == "1"
+        and request.node.get_closest_marker("e2e") is not None
+    )
 
 
 def _truncate_all_tables(conn: psycopg.Connection) -> None:
-    """Empty every table, retrying when the ARQ worker is still writing.
-    """
-    for attempt in range(TRUNCATE_ATTEMPTS):
-        conn.rollback()
-        rows = conn.execute(
-            "SELECT tablename FROM pg_tables "
-            "WHERE schemaname = 'public' AND tablename <> 'alembic_version'"
-        ).fetchall()
-        if not rows:
-            conn.commit()
-            return
+    conn.rollback()
+    conn.execute(f"SET lock_timeout = '{TRUNCATE_LOCK_TIMEOUT}'")
+    rows = conn.execute(
+        "SELECT tablename FROM pg_tables "
+        "WHERE schemaname = 'public' AND tablename <> 'alembic_version'"
+    ).fetchall()
+    if rows:
         table_names = ", ".join(f"{row[0]}" for row in rows)
-        try:
-            conn.execute(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE")
-        except psycopg.errors.DeadlockDetected:
-            conn.rollback()
-            if attempt == TRUNCATE_ATTEMPTS - 1:
-                raise
-            time.sleep(TRUNCATE_RETRY_SECONDS)
-            continue
-        conn.commit()
-        return
+        conn.execute(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE")
+    conn.commit()
 
 
 def _seed_test_owner(conn: psycopg.Connection) -> None:
@@ -80,20 +125,22 @@ def run_migrations(postgres_connection: psycopg.Connection) -> None:
 
 
 @pytest.fixture
-def clean_postgres_database(run_migrations: None, postgres_connection: psycopg.Connection) -> None:
-    _truncate_all_tables(postgres_connection)
+def clean_postgres_database(
+    request: pytest.FixtureRequest,
+    run_migrations: None,
+    postgres_connection: psycopg.Connection,
+) -> Generator[None, None, None]:
+    quiesce = _is_e2e(request)
+    with _quiesced_database(quiesce):
+        _truncate_all_tables(postgres_connection)
     _seed_test_owner(postgres_connection)
     yield
-    _truncate_all_tables(postgres_connection)
+    with _quiesced_database(quiesce):
+        _truncate_all_tables(postgres_connection)
 
 
 @pytest.fixture(autouse=True)
 def default_owner() -> Generator[None, None, None]:
-    """Authenticate every request as a fixed owner unless a test opts out.
-
-    Tests that exercise the session contract clear this override to assert the
-    401 path.
-    """
     from api.dependencies import get_current_owner
     from main import app
 
