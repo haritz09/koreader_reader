@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = False
     session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    session_rate_limit: int = 10
+    session_rate_limit_window_seconds: int = 60
+    trust_forwarded_for: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

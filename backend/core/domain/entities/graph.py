@@ -80,13 +80,11 @@ class FactLink:
 
 
 @dataclass(frozen=True)
-class BookGraphState:
-    """Stored graph and progress facts needed to decide whether work is due."""
+class BookState:
+    """Shared book facts needed by the worker; progress is per owner."""
 
     book_id: str
-    progress_position: float
     processing_status: str
-    graph_revision: int
 
 
 @dataclass(frozen=True)

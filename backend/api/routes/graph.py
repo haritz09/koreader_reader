@@ -2,11 +2,10 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from api.dependencies import get_book_graph_use_case, get_current_owner, get_library_repository
+from api.dependencies import get_book_graph_use_case, get_current_owner
 from api.schemas.graph import GraphEdgeResponse, GraphNodeResponse, GraphResponse
 from core.application.use_cases.get_book_graph import GetBookGraphUseCase
 from core.domain.errors import BookNotFoundError, BookNotReadyError
-from core.ports.library_repository import LibraryRepository
 
 router = APIRouter(prefix="/ebooks", tags=["graph"])
 
@@ -18,16 +17,10 @@ router = APIRouter(prefix="/ebooks", tags=["graph"])
 async def get_book_graph(
 	book_id: str,
 	owner_id: str = Depends(get_current_owner),
-	library: LibraryRepository = Depends(get_library_repository),
 	use_case: GetBookGraphUseCase = Depends(get_book_graph_use_case),
 ) -> GraphResponse:
-	if await library.get_book(owner_id, book_id) is None:
-		raise HTTPException(
-			status_code=status.HTTP_404_NOT_FOUND, detail="Book not found"
-		)
-
 	try:
-		graph = await use_case.execute(book_id)
+		graph = await use_case.execute(owner_id, book_id)
 	except BookNotFoundError as error:
 		raise HTTPException(
 			status_code=status.HTTP_404_NOT_FOUND, detail="Book not found"

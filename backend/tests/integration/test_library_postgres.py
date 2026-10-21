@@ -6,6 +6,7 @@ in-memory contract tests cannot prove.
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -192,8 +193,8 @@ def test_a_long_lived_reader_sees_status_changes_made_elsewhere(
     """
     postgres_connection.execute(
         "INSERT INTO books "
-        "(id, document_hash, storage_key, processing_status, progress_position) "
-        "VALUES ('book-1', 'hash-1', 'books/1.epub', 'processing', 0.0)"
+        "(id, document_hash, storage_key, processing_status) "
+        "VALUES ('book-1', 'hash-1', 'books/1.epub', 'processing')"
     )
     postgres_connection.execute(
         "INSERT INTO user_books (owner_id, book_id, added_at) VALUES (%s, 'book-1', now())",
@@ -220,3 +221,48 @@ def test_a_long_lived_reader_sees_status_changes_made_elsewhere(
     _run_against_postgres(work)
 
     assert seen == ["processing", "ready"]
+
+
+def test_reading_progress_is_stored_per_owner(
+    clean_postgres_database,
+    postgres_connection,
+) -> None:
+    """Two readers of one book must never share a position.
+
+    The graph and chat read this value to decide what is spoiler-free, so a
+    shared column would leak one owner's position into another's context.
+    """
+    postgres_connection.execute(
+        "INSERT INTO users (id, is_anonymous, created_at) "
+        "VALUES ('owner-2', true, now()) ON CONFLICT (id) DO NOTHING"
+    )
+    postgres_connection.execute(
+        "INSERT INTO books (id, document_hash, storage_key, processing_status) "
+        "VALUES ('book-1', 'hash-1', 'books/1.epub', 'ready')"
+    )
+    postgres_connection.execute(
+        "INSERT INTO user_books (owner_id, book_id, added_at) VALUES "
+        "(%s, 'book-1', now()), ('owner-2', 'book-1', now())",
+        (TEST_OWNER_ID,),
+    )
+    postgres_connection.commit()
+
+    async def work(session: AsyncSession) -> None:
+        library = PostgresLibraryRepository(session)
+        synced_at = datetime.now(UTC)
+
+        stored = await library.update_progress(
+            TEST_OWNER_ID, "book-1", 0.7, synced_at
+        )
+        first = await library.get_reading_state(TEST_OWNER_ID, "book-1")
+        second = await library.get_reading_state("owner-2", "book-1")
+
+        assert stored is True
+        assert first is not None
+        assert second is not None
+        assert first.progress_position == 0.7
+        assert first.last_synced_at is not None
+        assert second.progress_position == 0.0
+        assert second.last_synced_at is None
+
+    _run_against_postgres(work)

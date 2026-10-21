@@ -16,10 +16,12 @@ from db.models.book import Book
 from db.models.chapter import ChapterRecord
 from db.models.chunk import ChunkRecord
 from db.models.knowledge import EntityRecord, EventRecord, FactRecord, LocationRecord
+from db.models.user_book import UserBookRecord
 from db.repositories.knowledge_repository import PostgresKnowledgeRepository
 from db.repositories.postgres_book_repository import PostgresBookRepository
 from db.repositories.postgres_graph_repository import PostgresGraphRepository
 from db.session import engine, session_factory
+from tests.conftest import TEST_OWNER_ID
 
 pytestmark = pytest.mark.postgres
 
@@ -59,7 +61,6 @@ async def _seed_book(
     session: AsyncSession,
     book_id: str,
     positions: Sequence[float],
-    progress: float = 0.0,
     status: str = READY,
 ) -> dict[int, str]:
     session.add(
@@ -68,7 +69,6 @@ async def _seed_book(
             document_hash=f"{book_id}-document-hash",
             storage_key=f"books/{book_id}.epub",
             processing_status=status,
-            progress_position=progress,
         )
     )
     chapter_id = f"{book_id}-chapter-0"
@@ -465,19 +465,18 @@ def test_the_revision_is_reported_and_increments_atomically(
     _run_against_postgres(work)
 
 
-def test_the_graph_state_carries_the_stored_progress(
+def test_the_book_state_carries_the_processing_status(
     clean_postgres_database: None,
 ) -> None:
     async def work(session: AsyncSession) -> None:
-        await _seed_book(session, "book-a", _POSITIONS, progress=0.42, status=READY)
+        await _seed_book(session, "book-a", _POSITIONS, status=READY)
 
-        state = await PostgresBookRepository(session).get_graph_state("book-a")
+        state = await PostgresBookRepository(session).get_state("book-a")
 
         assert state is not None
-        assert state.progress_position == 0.42
+        assert state.book_id == "book-a"
         assert state.processing_status == READY
-        assert state.graph_revision == 0
-        assert await PostgresBookRepository(session).get_graph_state("missing") is None
+        assert await PostgresBookRepository(session).get_state("missing") is None
 
     _run_against_postgres(work)
 
@@ -554,6 +553,12 @@ def test_the_database_rejects_an_out_of_range_progress_position(
                 document_hash="book-bad-hash",
                 storage_key="books/book-bad.epub",
                 processing_status=READY,
+            )
+        )
+        session.add(
+            UserBookRecord(
+                owner_id=TEST_OWNER_ID,
+                book_id="book-bad",
                 progress_position=2.0,
             )
         )

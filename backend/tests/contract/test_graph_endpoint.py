@@ -7,19 +7,15 @@ that is covered by ``test_graph_postgres.py``.
 
 from fastapi.testclient import TestClient
 
-from api.dependencies import get_book_repository, get_graph_repository, get_library_repository
-from core.domain.entities.graph import BookGraphState, EntityMention, FactLink
+from api.dependencies import get_graph_repository, get_library_repository
+from core.domain.entities.graph import EntityMention, FactLink
+from core.domain.entities.library import ReadingState
 from main import app
 
 
 class StubLibraryRepository:
-    """Marks every known book as owned by the caller."""
+    """Reports the caller's stored position, or no membership at all."""
 
-    async def get_book(self, owner_id: str, book_id: str):
-        return object() if book_id == "book-123" else None
-
-
-class StubBookRepository:
     def __init__(
         self,
         progress_position: float = 0.5,
@@ -30,12 +26,14 @@ class StubBookRepository:
         self.processing_status = processing_status
         self.graph_revision = graph_revision
 
-    async def get_graph_state(self, book_id: str) -> BookGraphState | None:
+    async def get_reading_state(
+        self, owner_id: str, book_id: str
+    ) -> ReadingState | None:
         if book_id != "book-123":
             return None
-        return BookGraphState(
-            book_id=book_id,
+        return ReadingState(
             progress_position=self.progress_position,
+            last_synced_at=None,
             processing_status=self.processing_status,
             graph_revision=self.graph_revision,
         )
@@ -111,15 +109,14 @@ class FilteringGraphRepository:
         raise NotImplementedError
 
 
-def get_client(book_repository: StubBookRepository) -> TestClient:
-    app.dependency_overrides[get_book_repository] = lambda: book_repository
+def get_client(library: StubLibraryRepository) -> TestClient:
     app.dependency_overrides[get_graph_repository] = lambda: FilteringGraphRepository()
-    app.dependency_overrides[get_library_repository] = lambda: StubLibraryRepository()
+    app.dependency_overrides[get_library_repository] = lambda: library
     return TestClient(app)
 
 
-def fetch(book_repository: StubBookRepository, path: str = "/api/v1/ebooks/book-123/graph"):
-    client = get_client(book_repository)
+def fetch(library: StubLibraryRepository, path: str = "/api/v1/ebooks/book-123/graph"):
+    client = get_client(library)
     try:
         return client.get(path)
     finally:
@@ -127,7 +124,7 @@ def fetch(book_repository: StubBookRepository, path: str = "/api/v1/ebooks/book-
 
 
 def test_graph_endpoint_returns_nodes_and_edges_at_the_stored_position() -> None:
-    response = fetch(StubBookRepository(progress_position=0.5))
+    response = fetch(StubLibraryRepository(progress_position=0.5))
 
     assert response.status_code == 200
     body = response.json()
@@ -141,7 +138,7 @@ def test_graph_endpoint_returns_nodes_and_edges_at_the_stored_position() -> None
 
 
 def test_graph_endpoint_merges_mentions_of_the_same_entity() -> None:
-    response = fetch(StubBookRepository(progress_position=1.0))
+    response = fetch(StubLibraryRepository(progress_position=1.0))
 
     body = response.json()
     assert [node["node_id"] for node in body["nodes"]] == ["e1", "e3", "e4"]
@@ -150,7 +147,7 @@ def test_graph_endpoint_merges_mentions_of_the_same_entity() -> None:
 
 
 def test_graph_endpoint_returns_an_empty_graph_before_any_reading() -> None:
-    response = fetch(StubBookRepository(progress_position=0.0))
+    response = fetch(StubLibraryRepository(progress_position=0.0))
 
     body = response.json()
     assert body["nodes"] == []
@@ -158,7 +155,7 @@ def test_graph_endpoint_returns_an_empty_graph_before_any_reading() -> None:
 
 
 def test_graph_endpoint_ignores_a_client_supplied_position() -> None:
-    response = fetch(StubBookRepository(progress_position=0.5), "/api/v1/ebooks/book-123/graph?position=1.0")
+    response = fetch(StubLibraryRepository(progress_position=0.5), "/api/v1/ebooks/book-123/graph?position=1.0")
 
     assert response.status_code == 200
     assert [node["label"] for node in response.json()["nodes"]] == ["Alice", "Bob"]
@@ -166,19 +163,19 @@ def test_graph_endpoint_ignores_a_client_supplied_position() -> None:
 
 
 def test_graph_endpoint_returns_not_found_for_an_unknown_book() -> None:
-    response = fetch(StubBookRepository(), "/api/v1/ebooks/missing/graph")
+    response = fetch(StubLibraryRepository(), "/api/v1/ebooks/missing/graph")
 
     assert response.status_code == 404
 
 
 def test_graph_endpoint_conflicts_while_the_book_is_processing() -> None:
-    response = fetch(StubBookRepository(processing_status="processing"))
+    response = fetch(StubLibraryRepository(processing_status="processing"))
 
     assert response.status_code == 409
     assert "processing" in response.json()["detail"]
 
 
 def test_graph_endpoint_conflicts_after_a_failed_upload() -> None:
-    response = fetch(StubBookRepository(processing_status="failed"))
+    response = fetch(StubLibraryRepository(processing_status="failed"))
 
     assert response.status_code == 409

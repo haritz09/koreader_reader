@@ -2,7 +2,7 @@
 
 from core.domain.entities.graph import BookGraph
 from core.domain.errors import BookNotFoundError, BookNotReadyError
-from core.ports.book_repository import BookRepository
+from core.ports.library_repository import LibraryRepository
 from core.services.graph_assembly import GraphAssemblyService
 
 READY_STATUS = "ready"
@@ -13,14 +13,14 @@ class GetBookGraphUseCase:
 
     def __init__(
         self,
-        book_repository: BookRepository,
+        library: LibraryRepository,
         assembly: GraphAssemblyService,
     ) -> None:
-        self._book_repository = book_repository
+        self._library = library
         self._assembly = assembly
 
-    async def execute(self, book_id: str) -> BookGraph:
-        state = await self._book_repository.get_graph_state(book_id)
+    async def execute(self, owner_id: str, book_id: str) -> BookGraph:
+        state = await self._library.get_reading_state(owner_id, book_id)
         if state is None:
             raise BookNotFoundError(book_id)
         if state.processing_status != READY_STATUS:

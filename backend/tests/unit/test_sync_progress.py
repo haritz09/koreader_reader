@@ -1,9 +1,10 @@
 import asyncio
+from datetime import UTC, datetime
 
 import pytest
 
 from core.application.use_cases.sync_progress import SyncProgressUseCase
-from core.domain.entities.graph import BookGraphState
+from core.domain.entities.library import ReadingState
 from core.domain.entities.reading_progress import ReadingProgress
 from core.domain.errors import BookNotFoundError as DomainBookNotFoundError
 
@@ -20,19 +21,29 @@ class StubProgressProvider:
         return ReadingProgress(book_id="book-1", position=position)
 
 
-class StubProgressStore:
-    def __init__(
-        self,
-        state: BookGraphState | None = None,
-    ) -> None:
+class StubLibrary:
+    """Holds one owner's reading state, or none when the book is not owned."""
+
+    def __init__(self, state: ReadingState | None = None) -> None:
         self.state = state
         self.updates: list[tuple[str, float]] = []
 
-    async def update_progress(self, book_id: str, position: float) -> None:
-        self.updates.append((book_id, position))
-
-    async def get_graph_state(self, book_id: str) -> BookGraphState | None:
+    async def get_reading_state(
+        self, owner_id: str, book_id: str
+    ) -> ReadingState | None:
         return self.state
+
+    async def update_progress(
+        self,
+        owner_id: str,
+        book_id: str,
+        position: float,
+        synced_at: datetime,
+    ) -> bool:
+        if self.state is None:
+            return False
+        self.updates.append((book_id, position))
+        return True
 
 
 class RecordingGraphQueue:
@@ -41,16 +52,6 @@ class RecordingGraphQueue:
 
     async def enqueue(self, book_id: str) -> None:
         self.enqueued.append(book_id)
-
-
-class StubLibrary:
-    """Reports whether the caller owns the resolved book."""
-
-    def __init__(self, owned: bool = True) -> None:
-        self._owned = owned
-
-    async def get_book(self, owner_id: str, book_id: str):
-        return object() if self._owned else None
 
 
 class FailingGraphQueue:
@@ -62,83 +63,80 @@ def state(
     progress_position: float,
     processing_status: str = "ready",
     graph_revision: int = 3,
-) -> BookGraphState:
-    return BookGraphState(
-        book_id="book-1",
+) -> ReadingState:
+    return ReadingState(
         progress_position=progress_position,
+        last_synced_at=datetime.now(UTC),
         processing_status=processing_status,
         graph_revision=graph_revision,
     )
 
 
 def sync(
-    store: StubProgressStore,
+    library: StubLibrary,
     queue=None,
     position: float = 0.5,
     document_hash: str = "document-hash",
-    library: StubLibrary | None = None,
 ):
-    use_case = SyncProgressUseCase(
-        StubProgressProvider(), store, library or StubLibrary(), queue
-    )
+    use_case = SyncProgressUseCase(StubProgressProvider(), library, queue)
     return asyncio.run(use_case.execute(document_hash, position, "owner-1"))
 
 
 def test_moving_forward_queues_graph_generation() -> None:
-    store = StubProgressStore(state(0.2))
+    library = StubLibrary(state(0.2))
     queue = RecordingGraphQueue()
 
-    result = sync(store, queue, position=0.5)
+    result = sync(library, queue, position=0.5)
 
     assert queue.enqueued == ["book-1"]
     assert result.graph_generation_queued is True
-    assert store.updates == [("book-1", 0.5)]
+    assert library.updates == [("book-1", 0.5)]
 
 
 def test_rewinding_does_not_queue_graph_generation() -> None:
-    store = StubProgressStore(state(0.9))
+    library = StubLibrary(state(0.9))
     queue = RecordingGraphQueue()
 
-    result = sync(store, queue, position=0.3)
+    result = sync(library, queue, position=0.3)
 
     assert queue.enqueued == []
     assert result.graph_generation_queued is False
-    assert store.updates == [("book-1", 0.3)]
+    assert library.updates == [("book-1", 0.3)]
 
 
 def test_an_unchanged_position_does_not_queue_graph_generation() -> None:
-    store = StubProgressStore(state(0.5))
+    library = StubLibrary(state(0.5))
     queue = RecordingGraphQueue()
 
-    result = sync(store, queue, position=0.5)
+    result = sync(library, queue, position=0.5)
 
     assert queue.enqueued == []
     assert result.graph_generation_queued is False
 
 
 def test_a_book_still_processing_does_not_queue_graph_generation() -> None:
-    store = StubProgressStore(state(0.1, processing_status="processing"))
+    library = StubLibrary(state(0.1, processing_status="processing"))
     queue = RecordingGraphQueue()
 
-    result = sync(store, queue, position=0.9)
+    result = sync(library, queue, position=0.9)
 
     assert queue.enqueued == []
     assert result.graph_generation_queued is False
 
 
 def test_a_failed_book_does_not_queue_graph_generation() -> None:
-    store = StubProgressStore(state(0.1, processing_status="failed"))
+    library = StubLibrary(state(0.1, processing_status="failed"))
     queue = RecordingGraphQueue()
 
-    sync(store, queue, position=0.9)
+    sync(library, queue, position=0.9)
 
     assert queue.enqueued == []
 
 
 def test_the_response_reports_the_current_graph_revision() -> None:
-    store = StubProgressStore(state(0.1, graph_revision=11))
+    library = StubLibrary(state(0.1, graph_revision=11))
 
-    result = sync(store, RecordingGraphQueue(), position=0.9)
+    result = sync(library, RecordingGraphQueue(), position=0.9)
 
     assert result.graph_revision == 11
     assert result.book_id == "book-1"
@@ -146,36 +144,36 @@ def test_the_response_reports_the_current_graph_revision() -> None:
 
 
 def test_a_queue_failure_does_not_fail_the_sync() -> None:
-    store = StubProgressStore(state(0.1))
+    library = StubLibrary(state(0.1))
 
-    result = sync(store, FailingGraphQueue(), position=0.9)
+    result = sync(library, FailingGraphQueue(), position=0.9)
 
     assert result.graph_generation_queued is False
-    assert store.updates == [("book-1", 0.9)]
+    assert library.updates == [("book-1", 0.9)]
 
 
 def test_an_unknown_document_is_rejected_before_storing_progress() -> None:
-    store = StubProgressStore(state(0.1))
+    library = StubLibrary(state(0.1))
 
     with pytest.raises(DomainBookNotFoundError):
-        sync(store, RecordingGraphQueue(), document_hash="unknown")
+        sync(library, RecordingGraphQueue(), document_hash="unknown")
 
-    assert store.updates == []
+    assert library.updates == []
 
 
 def test_a_book_the_caller_does_not_own_is_rejected() -> None:
-    store = StubProgressStore(state(0.1))
+    library = StubLibrary(None)
 
     with pytest.raises(DomainBookNotFoundError):
-        sync(store, RecordingGraphQueue(), library=StubLibrary(owned=False))
+        sync(library, RecordingGraphQueue())
 
-    assert store.updates == []
+    assert library.updates == []
 
 
 def test_progress_is_stored_when_no_queue_is_configured() -> None:
-    store = StubProgressStore(state(0.1))
+    library = StubLibrary(state(0.1))
 
-    result = sync(store, None, position=0.9)
+    result = sync(library, None, position=0.9)
 
     assert result.graph_generation_queued is False
-    assert store.updates == [("book-1", 0.9)]
+    assert library.updates == [("book-1", 0.9)]

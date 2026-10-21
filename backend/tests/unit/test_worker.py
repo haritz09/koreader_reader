@@ -145,7 +145,7 @@ class FakeGraphBookRepository:
 		self.applied: list[dict[str, str]] = []
 		self.revision_bumps: list[str] = []
 
-	async def get_graph_state(self, book_id: str):
+	async def get_state(self, book_id: str):
 		return self.state
 
 	async def get_entity_candidates(self, book_id: str):
@@ -181,13 +181,11 @@ def candidate(entity_id: str, name: str, position: float = 0.0):
 
 
 def graph_state(processing_status: str = "ready"):
-	from core.domain.entities.graph import BookGraphState
+	from core.domain.entities.graph import BookState
 
-	return BookGraphState(
+	return BookState(
 		book_id="book-123",
-		progress_position=0.4,
 		processing_status=processing_status,
-		graph_revision=0,
 	)
 
 

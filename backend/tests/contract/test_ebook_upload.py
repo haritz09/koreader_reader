@@ -1,7 +1,10 @@
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 
 from api.dependencies import get_library_repository, get_upload_ebook_use_case
 from core.application.use_cases.process_ebook import EbookTooLargeError
+from core.domain.entities.library import LibraryBook
 from main import app
 from tests.fixtures.epub import valid_epub_bytes
 
@@ -71,7 +74,7 @@ class FakeLibraryRepository:
         self.book = book
 
     async def get_book(self, owner_id: str, book_id: str):
-        if self.book is not None and self.book.id == book_id:
+        if self.book is not None and self.book.book_id == book_id:
             return self.book
         return None
 
@@ -79,19 +82,30 @@ class FakeLibraryRepository:
         return [] if self.book is None else [self.book]
 
 
+def a_book(
+    *,
+    processing_status: str = "ready",
+    progress_position: float = 0.0,
+    processing_error: str | None = None,
+) -> LibraryBook:
+    return LibraryBook(
+        book_id="book-123",
+        document_hash="hash-123",
+        processing_status=processing_status,
+        processing_error=processing_error,
+        cover_path=None,
+        progress_position=progress_position,
+        added_at=datetime(2026, 1, 1, tzinfo=UTC),
+        last_synced_at=None,
+    )
+
+
 def test_status_endpoint_includes_processing_error_for_failed_book() -> None:
-    book = type(
-        "Book",
-        (),
-        {
-            "id": "book-123",
-            "document_hash": "hash-123",
-            "processing_status": "failed",
-            "progress_position": 0.25,
-            "processing_error": "Parser failed",
-            "cover_path": None,
-        },
-    )()
+    book = a_book(
+        processing_status="failed",
+        progress_position=0.25,
+        processing_error="Parser failed",
+    )
     app.dependency_overrides[get_library_repository] = lambda: FakeLibraryRepository(book)
     client = TestClient(app)
 
@@ -101,7 +115,9 @@ def test_status_endpoint_includes_processing_error_for_failed_book() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json() == {
+    body = response.json()
+    assert body.pop("added_at")
+    assert body == {
         "book_id": "book-123",
         "document_hash": "hash-123",
         "processing_status": "failed",
@@ -111,18 +127,7 @@ def test_status_endpoint_includes_processing_error_for_failed_book() -> None:
 
 
 def test_status_endpoint_omits_processing_error_for_pending_book() -> None:
-    book = type(
-        "Book",
-        (),
-        {
-            "id": "book-123",
-            "document_hash": "hash-123",
-            "processing_status": "pending",
-            "progress_position": 0.0,
-            "processing_error": None,
-            "cover_path": None,
-        },
-    )()
+    book = a_book(processing_status="pending")
     app.dependency_overrides[get_library_repository] = lambda: FakeLibraryRepository(book)
     client = TestClient(app)
 
@@ -132,7 +137,9 @@ def test_status_endpoint_omits_processing_error_for_pending_book() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json() == {
+    body = response.json()
+    assert body.pop("added_at")
+    assert body == {
         "book_id": "book-123",
         "document_hash": "hash-123",
         "processing_status": "pending",
@@ -154,18 +161,7 @@ def test_status_endpoint_returns_not_found_for_unknown_book() -> None:
 
 
 def test_library_endpoint_returns_the_owners_books() -> None:
-    book = type(
-        "Book",
-        (),
-        {
-            "id": "book-123",
-            "document_hash": "hash-123",
-            "processing_status": "ready",
-            "progress_position": 0.5,
-            "processing_error": None,
-            "cover_path": None,
-        },
-    )()
+    book = a_book(progress_position=0.5)
     app.dependency_overrides[get_library_repository] = lambda: FakeLibraryRepository(book)
     client = TestClient(app)
 

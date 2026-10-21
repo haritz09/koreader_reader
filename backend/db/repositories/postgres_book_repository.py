@@ -3,7 +3,7 @@
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.domain.entities.graph import BookGraphState
+from core.domain.entities.graph import BookState
 from db.models.book import Book
 from db.models.chapter import ChapterRecord
 from db.models.chunk import ChunkRecord
@@ -19,13 +19,6 @@ class PostgresBookRepository:
 			select(Book.id).where(Book.document_hash == document_hash)
 		)
 		return result.scalar_one_or_none()
-
-	async def update_progress(self, book_id: str, position: float) -> None:
-		book = await self.get_by_id(book_id)
-		if book is None:
-			return
-		book.progress_position = position
-		await self._session.commit()
 
 	async def get_by_document_hash(self, document_hash: str) -> Book | None:
 		result = await self._session.execute(
@@ -132,23 +125,19 @@ class PostgresBookRepository:
 		)
 		return result.all()
 
-	async def get_graph_state(self, book_id: str) -> BookGraphState | None:
+	async def get_state(self, book_id: str) -> BookState | None:
 		result = await self._session.execute(
 			select(
 				Book.id,
-				Book.progress_position,
 				Book.processing_status,
-				Book.graph_revision,
 			).where(Book.id == book_id)
 		)
 		row = result.one_or_none()
 		if row is None:
 			return None
-		return BookGraphState(
+		return BookState(
 			book_id=row[0],
-			progress_position=row[1],
-			processing_status=row[2],
-			graph_revision=row[3] or 0,
+			processing_status=row[1],
 		)
 
 	async def bump_graph_revision(self, book_id: str) -> int:

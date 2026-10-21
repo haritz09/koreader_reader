@@ -28,6 +28,7 @@ from core.application.use_cases.retry_ebook import (
 from core.application.use_cases.retry_ebook import (
 	BookNotFoundError as RetryBookNotFoundError,
 )
+from core.domain.entities.library import LibraryBook
 from core.domain.errors import BookNotFoundError, BookProcessingError
 from core.ports.library_repository import LibraryRepository, LibraryRepositoryFactory
 
@@ -36,14 +37,16 @@ router = APIRouter(prefix="/ebooks", tags=["ebooks"])
 STATUS_POLL_SECONDS = 1.0
 
 
-def _status_response(book) -> EbookStatusResponse:
+def _status_response(book: LibraryBook) -> EbookStatusResponse:
 	return EbookStatusResponse(
-		book_id=book.id,
+		book_id=book.book_id,
 		document_hash=book.document_hash,
 		processing_status=book.processing_status,
 		progress_position=book.progress_position,
 		processing_error=book.processing_error,
-		cover_url=f"/api/v1/ebooks/{book.id}/cover" if book.cover_path else None,
+		cover_url=f"/api/v1/ebooks/{book.book_id}/cover" if book.cover_path else None,
+		added_at=book.added_at,
+		last_synced_at=book.last_synced_at,
 	)
 
 
@@ -158,7 +161,7 @@ async def book_position_events(
 	from lib.events import subscribe, unsubscribe
 
 	async def event_generator():
-		queue = await subscribe(book_id)
+		queue = await subscribe(owner_id, book_id)
 		try:
 			while True:
 				event = await queue.get()
@@ -166,7 +169,7 @@ async def book_position_events(
 		except asyncio.CancelledError:
 			pass
 		finally:
-			unsubscribe(book_id, queue)
+			unsubscribe(owner_id, book_id, queue)
 
 	return StreamingResponse(
 		event_generator(),

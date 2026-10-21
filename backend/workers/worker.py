@@ -96,7 +96,7 @@ async def generate_graph(ctx: dict, book_id: str) -> None:
 		book_repository = PostgresBookRepository(session)
 		knowledge_repository = PostgresKnowledgeRepository(session)
 
-		state = await book_repository.get_graph_state(book_id)
+		state = await book_repository.get_state(book_id)
 		if state is None:
 			logger.warning("Graph generation skipped, book %s does not exist", book_id)
 			return

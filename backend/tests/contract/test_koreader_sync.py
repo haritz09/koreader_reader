@@ -7,7 +7,7 @@ from api.dependencies import (
 	get_koreader_progress_adapter,
 	get_library_repository,
 )
-from core.domain.entities.graph import BookGraphState
+from core.domain.entities.library import ReadingState
 from main import app
 
 
@@ -20,49 +20,53 @@ class RecordingGraphQueue:
 
 
 class InMemoryLibraryRepository:
-    def __init__(self, book_ids: set[str]) -> None:
-        self._book_ids = book_ids
-
-    async def get_book(self, owner_id: str, book_id: str):
-        return object() if book_id in self._book_ids else None
-
-
-class InMemoryBookRepository:
     def __init__(
         self,
-        books: dict[str, str],
+        book_ids: set[str],
         progress_position: float = 0.0,
         graph_revision: int = 0,
     ) -> None:
-        self._books = books
+        self._book_ids = book_ids
         self._progress_position = progress_position
         self._graph_revision = graph_revision
 
-    async def resolve_book_id(self, document_hash: str) -> str | None:
-        return self._books.get(document_hash)
-
-    async def update_progress(self, book_id: str, position: float) -> None:
-        self._progress_position = position
-
-    async def get_graph_state(self, book_id: str) -> BookGraphState | None:
-        if book_id not in self._books.values():
+    async def get_reading_state(
+        self, owner_id: str, book_id: str
+    ) -> ReadingState | None:
+        if book_id not in self._book_ids:
             return None
-        return BookGraphState(
-            book_id=book_id,
+        return ReadingState(
             progress_position=self._progress_position,
+            last_synced_at=None,
             processing_status="ready",
             graph_revision=self._graph_revision,
         )
 
+    async def update_progress(
+        self, owner_id: str, book_id: str, position: float, synced_at
+    ) -> bool:
+        if book_id not in self._book_ids:
+            return False
+        self._progress_position = position
+        return True
+
+
+class InMemoryBookRepository:
+    def __init__(self, books: dict[str, str]) -> None:
+        self._books = books
+
+    async def resolve_book_id(self, document_hash: str) -> str | None:
+        return self._books.get(document_hash)
+
 
 def client_for_books(books: dict[str, str], **kwargs) -> TestClient:
-    repository = InMemoryBookRepository(books, **kwargs)
+    repository = InMemoryBookRepository(books)
     app.dependency_overrides[get_book_repository] = lambda: repository
     app.dependency_overrides[get_koreader_progress_adapter] = lambda: (
         KoreaderProgressAdapter(repository)
     )
-    app.dependency_overrides[get_library_repository] = lambda: InMemoryLibraryRepository(
-        set(books.values())
+    app.dependency_overrides[get_library_repository] = lambda: (
+        InMemoryLibraryRepository(set(books.values()), **kwargs)
     )
     app.dependency_overrides[get_graph_generation_queue] = lambda: RecordingGraphQueue()
     return TestClient(app)

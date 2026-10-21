@@ -8,6 +8,7 @@ a device (for example KOReader) and sent as ``Authorization: Bearer``.
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from api.dependencies import (
+	enforce_session_rate_limit,
 	get_create_session_use_case,
 	get_current_owner,
 	get_token_service,
@@ -41,6 +42,7 @@ async def read_session(
 	"",
 	response_model=SessionCreatedResponse,
 	status_code=status.HTTP_201_CREATED,
+	dependencies=[Depends(enforce_session_rate_limit)],
 )
 async def create_session(
 	response: Response,

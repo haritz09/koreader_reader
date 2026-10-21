@@ -2,15 +2,15 @@
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from lib.events import publish
 
-from core.domain.entities.graph import BookGraphState
+from core.domain.entities.library import ReadingState
 from core.domain.errors import BookNotFoundError
 from core.ports.job_queue import GraphGenerationQueue
 from core.ports.library_repository import LibraryRepository
 from core.ports.reading_progress_provider import ReadingProgressProvider
-from core.ports.reading_progress_store import ReadingProgressStore
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +31,10 @@ class SyncProgressUseCase:
     def __init__(
         self,
         provider: ReadingProgressProvider,
-        progress_store: ReadingProgressStore,
         library: LibraryRepository,
         graph_queue: GraphGenerationQueue | None = None,
     ) -> None:
         self._provider = provider
-        self._progress_store = progress_store
         self._library = library
         self._graph_queue = graph_queue
 
@@ -49,20 +47,29 @@ class SyncProgressUseCase:
 
         # A known document is not enough: the caller must own the book, so a
         # token cannot write progress into someone else's library.
-        if await self._library.get_book(owner_id, progress.book_id) is None:
+        state = await self._library.get_reading_state(owner_id, progress.book_id)
+        if state is None:
             raise BookNotFoundError(document_hash)
 
-        state = await self._progress_store.get_graph_state(progress.book_id)
-        await self._progress_store.update_progress(progress.book_id, position)
+        stored = await self._library.update_progress(
+            owner_id,
+            progress.book_id,
+            position,
+            datetime.now(UTC),
+        )
+        if not stored:
+            raise BookNotFoundError(document_hash)
+
         queued = await self._queue_when_advanced(progress.book_id, position, state)
         await publish(
+            owner_id,
             progress.book_id,
             {"type": "position", "position": position},
         )
         return SyncResult(
             book_id=progress.book_id,
             position=position,
-            graph_revision=state.graph_revision if state else 0,
+            graph_revision=state.graph_revision,
             graph_generation_queued=queued,
         )
 
@@ -70,7 +77,7 @@ class SyncProgressUseCase:
         self,
         book_id: str,
         position: float,
-        state: BookGraphState | None,
+        state: ReadingState,
     ) -> bool:
         """Queue graph generation only when the reader moved forward.
 
@@ -79,7 +86,7 @@ class SyncProgressUseCase:
         graph and the job is only a refresh of entity identity, never a gate on
         what the reader can see.
         """
-        if self._graph_queue is None or state is None:
+        if self._graph_queue is None:
             return False
         if state.processing_status != READY_STATUS:
             return False

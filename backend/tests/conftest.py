@@ -151,6 +151,25 @@ def default_owner() -> Generator[None, None, None]:
         app.dependency_overrides.pop(get_current_owner, None)
 
 
+class _UnlimitedRateLimiter:
+    async def acquire(self, key: str, limit: int, window_seconds: int):
+        from core.ports.rate_limiter import RateLimitDecision
+
+        return RateLimitDecision(allowed=True)
+
+
+@pytest.fixture(autouse=True)
+def allow_all_rate_limits() -> Generator[None, None, None]:
+    from api.dependencies import get_rate_limiter
+    from main import app
+
+    app.dependency_overrides[get_rate_limiter] = lambda: _UnlimitedRateLimiter()
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_rate_limiter, None)
+
+
 @pytest.fixture(scope="session")
 def e2e_enabled() -> None:
     if os.getenv("RUN_E2E") != "1":

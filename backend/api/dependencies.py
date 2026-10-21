@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request, status
@@ -11,6 +12,7 @@ from adapters.auth.jwt_tokens import JwtTokenService
 from adapters.koreader.progress_provider import KoreaderProgressAdapter
 from adapters.queue.arq_graph_queue import ArqGraphGenerationQueue
 from adapters.queue.arq_queue import ArqEbookProcessingQueue
+from adapters.rate_limit.redis_rate_limiter import RedisRateLimiter
 from adapters.storage.local_ebook_storage import LocalEbookStorage
 from core.application.use_cases.create_session import CreateAnonymousSessionUseCase
 from core.application.use_cases.delete_ebook import DeleteEbookUseCase
@@ -25,6 +27,7 @@ from core.ports.graph_repository import GraphRepository
 from core.ports.job_queue import EbookProcessingQueue, GraphGenerationQueue
 from core.ports.knowledge_repository import KnowledgeRepository
 from core.ports.library_repository import LibraryRepository, LibraryRepositoryFactory
+from core.ports.rate_limiter import RateLimiter
 from core.ports.reading_progress_provider import ReadingProgressProvider
 from core.ports.token_service import TokenService
 from core.ports.user_repository import UserRepository
@@ -102,6 +105,36 @@ def get_token_service() -> TokenService:
 	)
 
 
+@lru_cache
+def get_rate_limiter() -> RateLimiter:
+	return RedisRateLimiter(settings.redis_url)
+
+
+def _caller_ip(request: Request) -> str:
+	if settings.trust_forwarded_for:
+		forwarded = request.headers.get("x-forwarded-for", "")
+		if forwarded:
+			return forwarded.split(",")[0].strip()
+	return request.client.host if request.client else "unknown"
+
+
+async def enforce_session_rate_limit(
+	request: Request,
+	limiter: RateLimiter = Depends(get_rate_limiter),
+) -> None:
+	decision = await limiter.acquire(
+		f"session:{_caller_ip(request)}",
+		settings.session_rate_limit,
+		settings.session_rate_limit_window_seconds,
+	)
+	if not decision.allowed:
+		raise HTTPException(
+			status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+			detail="Too many sessions created",
+			headers={"Retry-After": str(decision.retry_after)},
+		)
+
+
 def get_current_owner(
 	request: Request,
 	tokens: TokenService = Depends(get_token_service),
@@ -151,18 +184,17 @@ def get_koreader_progress_adapter(
 
 def get_sync_progress_use_case(
 	adapter: ReadingProgressProvider = Depends(get_koreader_progress_adapter),
-	book_repository: BookRepository = Depends(get_book_repository),
 	library: LibraryRepository = Depends(get_library_repository),
 	graph_queue: GraphGenerationQueue = Depends(get_graph_generation_queue),
 ) -> SyncProgressUseCase:
-	return SyncProgressUseCase(adapter, book_repository, library, graph_queue)
+	return SyncProgressUseCase(adapter, library, graph_queue)
 
 
 def get_book_graph_use_case(
-	book_repository: BookRepository = Depends(get_book_repository),
+	library: LibraryRepository = Depends(get_library_repository),
 	assembly: GraphAssemblyService = Depends(get_graph_assembly_service),
 ) -> GetBookGraphUseCase:
-	return GetBookGraphUseCase(book_repository, assembly)
+	return GetBookGraphUseCase(library, assembly)
 
 
 def get_upload_ebook_use_case(
