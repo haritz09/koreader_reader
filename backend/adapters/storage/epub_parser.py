@@ -6,14 +6,39 @@ from bs4 import BeautifulSoup
 from ebooklib import ITEM_COVER, ITEM_DOCUMENT, ITEM_IMAGE, epub
 
 from core.domain.entities.chapter import Chapter
+from core.ports.ebook_metadata import EbookMetadata
 
 
 class EpubParser:
 	async def parse(self, storage_path: str) -> list[Chapter]:
 		return await asyncio.to_thread(self._parse_sync, storage_path)
 
+	async def read_metadata(self, storage_path: str) -> EbookMetadata:
+		return await asyncio.to_thread(self._read_metadata_sync, storage_path)
+
 	async def extract_cover(self, storage_path: str) -> bytes | None:
 		return await asyncio.to_thread(self._extract_cover_sync, storage_path)
+
+	@staticmethod
+	def _read_metadata_sync(storage_path: str) -> EbookMetadata:
+		book = epub.read_epub(storage_path)
+		titles = [
+			value.strip()
+			for value, _ in book.get_metadata("DC", "title")
+			if value and value.strip()
+		]
+		author = next(
+			(
+				value.strip()
+				for value, _ in book.get_metadata("DC", "creator")
+				if value and value.strip()
+			),
+			None,
+		)
+		return EbookMetadata(
+			title=titles[0] if titles else None,
+			author=author,
+		)
 
 	@staticmethod
 	def _parse_sync(storage_path: str) -> list[Chapter]:

@@ -16,6 +16,8 @@ class LibraryBook:
     progress_position: float
     added_at: datetime
     last_synced_at: datetime | None
+    title: str | None = None
+    author: str | None = None
 
 
 @dataclass(frozen=True)

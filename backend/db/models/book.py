@@ -14,6 +14,8 @@ class Book(Base):
 		String(64), unique=True, index=True, nullable=False
 	)
 	storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+	title: Mapped[str | None] = mapped_column(String(512))
+	author: Mapped[str | None] = mapped_column(String(512))
 	cover_path: Mapped[str | None] = mapped_column(String(512))
 	processing_status: Mapped[str] = mapped_column(
 		String(32), nullable=False, default="pending"

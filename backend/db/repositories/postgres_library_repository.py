@@ -111,6 +111,8 @@ class PostgresLibraryRepository:
 				Book.processing_status,
 				Book.processing_error,
 				Book.cover_path,
+				Book.title,
+				Book.author,
 				UserBookRecord.progress_position,
 				UserBookRecord.added_at,
 				UserBookRecord.last_synced_at,

@@ -2,14 +2,18 @@
 
 import hashlib
 import io
+import logging
 import uuid
 import zipfile
 from dataclasses import dataclass
 
 from core.ports.book_repository import BookRepository
+from core.ports.ebook_metadata import EbookMetadataReader
 from core.ports.ebook_storage import EbookStorage
 from core.ports.job_queue import EbookProcessingQueue
 from core.ports.library_repository import LibraryRepository
+
+logger = logging.getLogger(__name__)
 
 
 class InvalidEbookError(Exception):
@@ -34,12 +38,14 @@ class UploadEbookUseCase:
 		storage: EbookStorage,
 		queue: EbookProcessingQueue,
 		library: LibraryRepository,
+		metadata_reader: EbookMetadataReader,
 		max_size_bytes: int = 10 * 1024 * 1024,
 	):
 		self._repository = repository
 		self._storage = storage
 		self._queue = queue
 		self._library = library
+		self._metadata_reader = metadata_reader
 		self._max_size_bytes = max_size_bytes
 
 	async def execute(self, content: bytes, owner_id: str) -> EbookUploadResult:
@@ -54,28 +60,25 @@ class UploadEbookUseCase:
 		document_hash = hashlib.md5(content).hexdigest()
 		existing = await self._repository.get_by_document_hash(document_hash)
 		if existing is not None:
-			# The content is shared, so the same book is added back to the
-			# library under the same identity instead of being recreated.
-			await self._library.link(owner_id, existing.id)
-			if existing.processing_status == "failed":
-				await self._storage.save(existing.storage_key, content)
-				await self._repository.mark_pending(existing.id)
-				await self._queue.enqueue(existing.id, existing.storage_key)
-				return EbookUploadResult(
-					book_id=existing.id,
-					document_hash=existing.document_hash,
-					processing_status="pending",
-				)
-			return EbookUploadResult(
-				book_id=existing.id,
-				document_hash=existing.document_hash,
-				processing_status=existing.processing_status,
-			)
+			return await self._add_existing(existing, content, owner_id)
 
 		book_id = str(uuid.uuid4())
 		storage_key = f"books/{book_id}.epub"
-		await self._storage.save(storage_key, content)
-		book = await self._repository.create(book_id, document_hash, storage_key)
+		saved_path = await self._storage.save(storage_key, content)
+		book, created = await self._repository.get_or_create(
+			book_id, document_hash, storage_key
+		)
+
+		if not created:
+			try:
+				await self._storage.delete(storage_key)
+			except Exception:
+				logger.warning(
+					"Could not remove orphaned upload %s", storage_key, exc_info=True
+				)
+			return await self._add_existing(book, content, owner_id)
+
+		await self._apply_metadata(book, saved_path)
 		await self._library.link(owner_id, book.id)
 		await self._queue.enqueue(book.id, book.storage_key)
 		return EbookUploadResult(
@@ -83,6 +86,48 @@ class UploadEbookUseCase:
 			document_hash=book.document_hash,
 			processing_status=book.processing_status,
 		)
+
+	async def _add_existing(
+		self, book, content: bytes, owner_id: str
+	) -> EbookUploadResult:
+		await self._library.link(owner_id, book.id)
+		if book.processing_status == "failed":
+			saved_path = await self._storage.save(book.storage_key, content)
+			await self._repository.mark_pending(book.id)
+			await self._apply_metadata(book, saved_path)
+			await self._queue.enqueue(book.id, book.storage_key)
+			return EbookUploadResult(
+				book_id=book.id,
+				document_hash=book.document_hash,
+				processing_status="pending",
+			)
+		if book.title is None:
+			saved_path = await self._storage.save(book.storage_key, content)
+			await self._apply_metadata(book, saved_path)
+		return EbookUploadResult(
+			book_id=book.id,
+			document_hash=book.document_hash,
+			processing_status=book.processing_status,
+		)
+
+	async def _apply_metadata(self, book, storage_path: str) -> None:
+		try:
+			metadata = await self._metadata_reader.read_metadata(storage_path)
+		except Exception:
+			logger.warning(
+				"Could not read EPUB metadata for book %s", book.id, exc_info=True
+			)
+			return
+		if metadata.title is None and metadata.author is None:
+			return
+		try:
+			await self._repository.set_metadata(
+				book.id, metadata.title, metadata.author
+			)
+		except Exception:
+			logger.warning(
+				"Could not store EPUB metadata for book %s", book.id, exc_info=True
+			)
 
 	@staticmethod
 	def _is_valid_epub(content: bytes) -> bool:

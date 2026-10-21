@@ -14,12 +14,12 @@ This file records durable project decisions, product choices, and current state.
 - The deliverable is a knowledge graph that a client renders visually, not a question-answering feature.
 - The graph is refreshed by reading progress. When a KOReader sync advances the stored position, the client refetches the graph and sees newly visible knowledge. A sync that finds no new data changes nothing.
 - `api/dependencies.py` is the composition root. Every provider returns a port (`LibraryRepository`, `BookRepository`, `TokenService`, `EbookStorage`, ...) and builds the concrete adapter internally, so routers, use-case providers, and `get_current_owner` depend on ports only. The wiring module is the single place that names Postgres or a provider-specific adapter.
-- A read that is repeated on a long-lived session must be refresh-safe. SQLAlchemy's identity map replays the entity it loaded first, so `PostgresLibraryRepository` reads set `populate_existing`; otherwise the processing-status stream would never observe a status the worker committed after the first poll.
+- A read that is repeated on a long-lived session must be refresh-safe. The identity map replays the entity it loaded first, so `PostgresLibraryRepository` projects book and membership columns into fresh `LibraryBook`/`ReadingState` dataclasses on every read instead of returning ORM entities; otherwise the processing-status stream would never observe a status the worker committed after the first poll.
 - An endpoint that streams cannot reuse a request-scoped repository: FastAPI tears a dependency with `yield` down before the response body is sent. Such endpoints take `LibraryRepositoryFactory` and open their own session, so the port keeps the route free of persistence knowledge while the resource lives as long as the stream.
 
 ## Graph Generation Decision
 
-- The graph read is the anti-spoiler boundary for this feature. `GET /api/v1/ebooks/{book_id}/graph` takes no position parameter; it resolves the reader's position from `books.progress_position` in storage. 
+- The graph read is the anti-spoiler boundary for this feature. `GET /api/v1/ebooks/{book_id}/graph` takes no position parameter; it resolves the caller's position from `user_books.progress_position` for that owner. Ownership and position are read together, so an unowned book is indistinguishable from an unknown one.
 - Materializing a full graph snapshot at the sync position is forbidden. Readers re-read, so a snapshot built at a previous high-water mark would disclose knowledge the reader has rewound past. The stored mapping is a position-independent identity pointer; the visible graph is derived per request.
 - `entities.canonical_id` stores identity only. No canonical display name is stored, because a single stored name would let a later alias label a node the reader has not reached. `GraphAssemblyService` derives every label, `description`, `sub_type`, `aliases`, `first_seen_position`, and `mention_count` from the mentions visible at the requested position.
 - Identity resolution runs over every mention in the book, deliberately unfiltered by reading position. The output is an id-to-id mapping containing no text, so resolving ahead of the reader discloses nothing. Do not add a position clause to `PostgresKnowledgeRepository.get_entity_candidates`: `canonical_id` is book-level stored state, and making it position-dependent would make stored identity depend on when the job happened to run rather than on the book. Labels are derived from visible mentions in `GraphAssemblyService`, which is where the boundary holds.
@@ -35,7 +35,7 @@ This file records durable project decisions, product choices, and current state.
 
 ## Reading Position Validation Decision
 
-- `ReadingPosition` in `core/domain/value_objects/` is the single definition of a valid position: finite, numeric, and within `[0.0, 1.0]`. Every repository query validates through it before building SQL, and `CHECK` constraints enforce the same range in the database for `entities`, `facts`, `events`, `locations`, and `books.progress_position`.
+- `ReadingPosition` in `core/domain/value_objects/` is the single definition of a valid position: finite, numeric, and within `[0.0, 1.0]`. Every repository query validates through it before building SQL, and `CHECK` constraints enforce the same range in the database for `entities`, `facts`, `events`, `locations`, and `user_books.progress_position`.
 - Before this, the repository accepted any `float`, so a position above `1.0` returned the whole book. The value object plus the constraints are what make the boundary fail closed.
 
 ## Multi-User Ownership Decision
@@ -46,13 +46,19 @@ This file records durable project decisions, product choices, and current state.
 - Ownership lives in `user_books(owner_id, book_id, added_at, deleted_at)`, not on `books`. Book content stays shared: `books.document_hash` remains globally unique, so the same EPUB is parsed and its knowledge extracted (and paid for) once no matter how many owners add it. Verified by `test_a_shared_book_keeps_one_content_row_for_two_owners`.
 - Deleting a book is a full soft-delete: only `user_books.deleted_at` is set. The book row, chapters, chunks, entities, facts, events, locations, and the cover are never touched, so the book can be restored. `DELETE /api/v1/ebooks/{book_id}` returns 204, 409 while `processing_status == "processing"`, and 404 for an unknown or unowned book so deletion never discloses another owner's library.
 - Re-uploading a previously deleted EPUB restores the same `book_id` because the content row was never removed; `link` clears `deleted_at` on conflict.
+- Concurrent uploads of identical content are arbitrated by the unique `document_hash`, never by the pre-check. `PostgresBookRepository.get_or_create` uses `INSERT ... ON CONFLICT (document_hash) DO NOTHING RETURNING`; the loser deletes the file it just saved and joins the winner's row and storage key. That leaves one `books` row, one file, and one enqueued job. The pre-check is only a fast path.
+- The library delete is confirmed inline in the card. A failed delete (for example 409 while `processing`) keeps the panel open and shows the API message; only success closes it and refreshes the grid.
 - Nothing is purged yet. The eventual hard purge (content plus cover) runs only when no active owner references the book and a retention window has elapsed; that job does not exist. `user_books` carries `ON DELETE CASCADE` to both `users` and `books` as the safety net for it.
 - Re-uploading a `failed` book resets it in place (`mark_pending` plus re-enqueue) instead of deleting and recreating it. The delete-and-create path was what made one upload look like it removed other books.
 - `PostgresBookRepository.replace_derived_content` deletes knowledge rows before chunks and chapters, because knowledge references chunks. Without it, reprocessing the same `book_id` fails on the foreign key.
-- Progress stays on `books.progress_position` for now. Per-owner progress in `user_books` is an intentional later refactor, so the anti-spoiler read filter is unchanged here.
+- Reading progress belongs to the reader, not to the shared book. It lives in `user_books.progress_position` with `last_synced_at`, so two owners of one EPUB can be at different points and neither position leaks into the other's graph or chat context. The old `books.progress_position` is dropped; migration `c9d0e1f2a3b4` copies its value into every membership before dropping it. A rewind still queues no graph job, but the graph read always uses the caller's stored position.
+- One write path stores progress: `SyncProgressUseCase` reads the owner's `ReadingState`, validates membership, calls `LibraryRepository.update_progress`, then decides whether to enqueue graph generation by comparing against the previous position. `ReadingProgressStore` and `BookRepository.update_progress` no longer exist; `BookGraphState` became `BookState(book_id, processing_status)` for the worker only.
+- The in-process SSE bus is keyed by `(owner_id, book_id)`, not `book_id`, so a holder of a valid token cannot subscribe to another owner's position events.
 - CORS uses explicit `cors_origins` because a credentialed request cannot be answered with `Access-Control-Allow-Origin: *`; the session travels in a cookie.
 - `JWT_SECRET` must be set to a stable value of at least 32 bytes outside local development, or every issued session invalidates on restart and PyJWT warns that the HMAC key is too short. `SESSION_COOKIE_SECURE` stays `false` only for local HTTP; over HTTPS it must be `true`. Both are listed in `backend/.env.example`.
 - `tests/conftest.py` authenticates every test as a fixed owner through an autouse `get_current_owner` override, and seeds that owner row so the `user_books` foreign key holds. The `e2e` tier instead creates a real session, because the container runs the real dependency.
+- `POST /api/v1/session` is rate limited to `SESSION_RATE_LIMIT` requests per `SESSION_RATE_LIMIT_WINDOW_SECONDS` per client IP (default 10 per 60 s) by `RedisRateLimiter`, a fixed-window `INCR`/`EXPIRE` Lua script. Over the limit returns 429 with `Retry-After`; a Redis failure fails open so session creation never depends on the limiter. `TRUST_FORWARDED_FOR` is opt-in for deployments behind a trusted proxy, because clients can forge the header.
+- Tests override `get_rate_limiter` with an allow-all double so the limit never couples unrelated tests; the e2e tier exercises the real limiter.
 
 ## KOReader Integration Decision
 
@@ -89,6 +95,8 @@ This file records durable project decisions, product choices, and current state.
 ## Current State
 
 - The versioned KOReader sync endpoint, ebook upload endpoint, graph endpoint, anonymous session endpoint, and library delete endpoint are implemented with unit, contract, postgres, and e2e coverage.
+- Reading progress is per owner in `user_books`, and `GET /api/v1/ebooks` exposes `added_at` and `last_synced_at` alongside it so the client can sort a library without borrowing another owner's state.
+- `POST /api/v1/session` rejects a client IP that exceeds its window with 429 and a `Retry-After` header; all other limits are unchanged.
 - The upload pipeline has local storage, ARQ queue and worker boundaries, EPUB parsing, chunk persistence, processing status, and a book status endpoint.
 - Docker configuration is available for the API, ARQ worker, PostgreSQL, and Redis services.
 - Entity resolution runs in the background after extraction and on forward progress sync. The graph endpoint is registered at `/api/v1/ebooks/{book_id}/graph`.

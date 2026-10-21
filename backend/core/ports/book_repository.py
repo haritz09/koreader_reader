@@ -12,12 +12,12 @@ class BookRepository(Protocol):
     async def get_by_document_hash(self, document_hash: str) -> Any | None:
         ...
 
-    async def create(
+    async def get_or_create(
         self,
         book_id: str,
         document_hash: str,
         storage_key: str,
-    ) -> Any:
+    ) -> tuple[Any, bool]:
         ...
 
     async def get_by_id(self, book_id: str) -> Any | None:
@@ -47,6 +47,11 @@ class BookRepository(Protocol):
         ...
 
     async def get_state(self, book_id: str) -> BookState | None:
+        ...
+
+    async def set_metadata(
+        self, book_id: str, title: str | None, author: str | None
+    ) -> None:
         ...
 
     async def bump_graph_revision(self, book_id: str) -> int:

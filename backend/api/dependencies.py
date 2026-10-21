@@ -13,6 +13,7 @@ from adapters.koreader.progress_provider import KoreaderProgressAdapter
 from adapters.queue.arq_graph_queue import ArqGraphGenerationQueue
 from adapters.queue.arq_queue import ArqEbookProcessingQueue
 from adapters.rate_limit.redis_rate_limiter import RedisRateLimiter
+from adapters.storage.epub_parser import EpubParser
 from adapters.storage.local_ebook_storage import LocalEbookStorage
 from core.application.use_cases.create_session import CreateAnonymousSessionUseCase
 from core.application.use_cases.delete_ebook import DeleteEbookUseCase
@@ -22,6 +23,7 @@ from core.application.use_cases.retry_ebook import RetryEbookUseCase
 from core.application.use_cases.sync_progress import SyncProgressUseCase
 from core.config import settings
 from core.ports.book_repository import BookRepository
+from core.ports.ebook_metadata import EbookMetadataReader
 from core.ports.ebook_storage import EbookStorage
 from core.ports.graph_repository import GraphRepository
 from core.ports.job_queue import EbookProcessingQueue, GraphGenerationQueue
@@ -42,6 +44,10 @@ from db.session import get_db_session, session_factory
 
 def get_ebook_storage() -> EbookStorage:
 	return LocalEbookStorage(Path(settings.ebook_storage_path))
+
+
+def get_ebook_metadata_reader() -> EbookMetadataReader:
+	return EpubParser()
 
 
 def get_ebook_processing_queue() -> EbookProcessingQueue:
@@ -202,12 +208,14 @@ def get_upload_ebook_use_case(
 	storage: EbookStorage = Depends(get_ebook_storage),
 	queue: EbookProcessingQueue = Depends(get_ebook_processing_queue),
 	library: LibraryRepository = Depends(get_library_repository),
+	metadata_reader: EbookMetadataReader = Depends(get_ebook_metadata_reader),
 ) -> UploadEbookUseCase:
 	return UploadEbookUseCase(
 		book_repository,
 		storage,
 		queue,
 		library,
+		metadata_reader,
 		max_size_bytes=settings.max_ebook_size_bytes,
 	)
 

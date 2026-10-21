@@ -39,6 +39,8 @@ export interface EbookStatusResponse extends EbookUploadResponse {
   cover_url: string | null;
   added_at: string;
   last_synced_at: string | null;
+  title: string | null;
+  author: string | null;
 }
 
 export interface EbookListResponse {

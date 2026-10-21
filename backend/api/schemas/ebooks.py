@@ -15,6 +15,8 @@ class EbookStatusResponse(EbookUploadResponse):
     cover_url: str | None = None
     added_at: datetime
     last_synced_at: datetime | None = None
+    title: str | None = None
+    author: str | None = None
 
 
 class EbookListResponse(BaseModel):

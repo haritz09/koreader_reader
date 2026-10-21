@@ -22,8 +22,25 @@ export function BookCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const progressPercent = Math.round(book.progress_position * 100);
   const isProcessing = book.processing_status === "processing";
+
+  const closeMenu = () => {
+    setMenuOpen(false);
+    setConfirmingDelete(false);
+    setDeleteError(null);
+  };
+
+  const toggleMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (menuOpen) {
+      closeMenu();
+      return;
+    }
+    setMenuOpen(true);
+  };
 
   const statusLabel =
     book.processing_status === "ready"
@@ -50,14 +67,17 @@ export function BookCard({
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setDeleting(true);
+    setDeleteError(null);
     try {
       await deleteEbook(book.book_id);
+      closeMenu();
       onDelete();
     } catch (err) {
-      console.error("Delete failed:", err);
+      setDeleteError(
+        err instanceof Error ? err.message : "No se pudo eliminar el libro"
+      );
     } finally {
       setDeleting(false);
-      setMenuOpen(false);
     }
   };
 
@@ -96,40 +116,76 @@ export function BookCard({
         )}
         <button
           className="absolute right-2 top-2 rounded-full bg-white/80 p-1 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-900/80"
-          onClick={(e) => {
-            e.stopPropagation();
-            setMenuOpen(!menuOpen);
-          }}
+          onClick={toggleMenu}
         >
           <svg className="h-4 w-4 text-gray-600 dark:text-gray-300" fill="currentColor" viewBox="0 0 20 20">
             <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
           </svg>
         </button>
         {menuOpen && (
-          <div className="absolute right-2 top-10 z-10 rounded-md bg-white py-1 shadow-lg ring-1 ring-black/5 dark:bg-gray-800 dark:ring-white/10">
-            <button
-              onClick={handleDelete}
-              disabled={deleting || isProcessing}
-              title={
-                isProcessing
-                  ? "No se puede eliminar mientras se procesa"
-                  : undefined
-              }
-              className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200 dark:hover:bg-gray-700"
-            >
-              {deleting ? "Eliminando..." : "Eliminar"}
-            </button>
+          <div
+            className="absolute right-2 top-10 z-10 w-56 rounded-md bg-white py-1 text-left shadow-lg ring-1 ring-black/5 dark:bg-gray-800 dark:ring-white/10"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {confirmingDelete ? (
+              <div className="px-4 py-3">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  ¿Eliminar este libro?
+                </p>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Se quitará de tu biblioteca. Podrás volver a subirlo después.
+                </p>
+                {deleteError && (
+                  <p className="mt-2 text-xs text-red-500">{deleteError}</p>
+                )}
+                <div className="mt-3 flex justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setConfirmingDelete(false);
+                      setDeleteError(null);
+                    }}
+                    disabled={deleting}
+                    className="rounded-md px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {deleting ? "Eliminando..." : "Eliminar"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => {
+                  setConfirmingDelete(true);
+                  setDeleteError(null);
+                }}
+                disabled={isProcessing}
+                title={
+                  isProcessing
+                    ? "No se puede eliminar mientras se procesa"
+                    : undefined
+                }
+                className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Eliminar
+              </button>
+            )}
           </div>
         )}
       </div>
       <div className="mt-3">
         <div className="flex items-start justify-between">
           <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
-            Libro
+            {book.title ?? "Sin título"}
           </h3>
         </div>
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          Autor desconocido
+          {book.author ?? "Autor desconocido"}
         </p>
         <div className="mt-2 flex items-center gap-2">
           <div className="h-1 flex-1 rounded-full bg-gray-200 dark:bg-gray-700">

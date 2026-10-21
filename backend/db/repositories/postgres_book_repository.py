@@ -1,6 +1,7 @@
 """Book repository implementation for postgres."""
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.entities.graph import BookState
@@ -26,21 +27,35 @@ class PostgresBookRepository:
 		)
 		return result.scalar_one_or_none()
 
-	async def create(
+	async def get_or_create(
 		self,
 		book_id: str,
 		document_hash: str,
 		storage_key: str,
-	) -> Book:
-		book = Book(
-			id=book_id,
-			document_hash=document_hash,
-			storage_key=storage_key,
+	) -> tuple[Book, bool]:
+		
+		statement = (
+			pg_insert(Book)
+			.values(
+				id=book_id,
+				document_hash=document_hash,
+				storage_key=storage_key,
+				processing_status="pending",
+				graph_revision=0,
+			)
+			.on_conflict_do_nothing(index_elements=[Book.document_hash])
+			.returning(Book)
 		)
-		self._session.add(book)
+		result = await self._session.execute(statement)
+		created = result.scalar_one_or_none()
 		await self._session.commit()
-		await self._session.refresh(book)
-		return book
+		if created is not None:
+			return created, True
+
+		existing = await self.get_by_document_hash(document_hash)
+		if existing is None:
+			raise RuntimeError("Conflicting book disappeared during upload")
+		return existing, False
 
 	async def get_by_id(self, book_id: str) -> Book | None:
 		result = await self._session.execute(select(Book).where(Book.id == book_id))
@@ -139,6 +154,16 @@ class PostgresBookRepository:
 			book_id=row[0],
 			processing_status=row[1],
 		)
+
+	async def set_metadata(
+		self, book_id: str, title: str | None, author: str | None
+	) -> None:
+		await self._session.execute(
+			update(Book)
+			.where(Book.id == book_id)
+			.values(title=title, author=author)
+		)
+		await self._session.commit()
 
 	async def bump_graph_revision(self, book_id: str) -> int:
 		result = await self._session.execute(

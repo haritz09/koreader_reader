@@ -58,8 +58,16 @@ export function BookGrid({ onSelectBook }: BookGridProps) {
   }, [books, fetchBooks]);
 
   const sortedBooks = [...books].sort((a, b) => {
-    if (sortBy === "title") return a.book_id.localeCompare(b.book_id);
-    return b.progress_position - a.progress_position;
+    if (sortBy === "title") {
+      const titleA = a.title?.trim() || null;
+      const titleB = b.title?.trim() || null;
+      if (titleA && titleB) {
+        return titleA.localeCompare(titleB, "es", { sensitivity: "base" });
+      }
+      if (titleA) return -1;
+      if (titleB) return 1;
+    }
+    return Date.parse(b.added_at) - Date.parse(a.added_at);
   });
 
   if (loading) {

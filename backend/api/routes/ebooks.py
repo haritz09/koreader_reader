@@ -47,6 +47,8 @@ def _status_response(book: LibraryBook) -> EbookStatusResponse:
 		cover_url=f"/api/v1/ebooks/{book.book_id}/cover" if book.cover_path else None,
 		added_at=book.added_at,
 		last_synced_at=book.last_synced_at,
+		title=book.title,
+		author=book.author,
 	)
 
 
@@ -193,7 +195,23 @@ async def get_book_cover(
 	cover_path = Path(book.cover_path)
 	if not cover_path.exists():
 		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover file not found")
-	return FileResponse(cover_path, media_type="image/jpeg")
+	return FileResponse(
+		cover_path,
+		media_type=_cover_media_type(cover_path),
+		headers={"Cache-Control": "private, max-age=3600"},
+	)
+
+
+def _cover_media_type(path: Path) -> str:
+	with path.open("rb") as stream:
+		header = stream.read(12)
+	if header.startswith(b"\x89PNG\r\n\x1a\n"):
+		return "image/png"
+	if header.startswith(b"GIF8"):
+		return "image/gif"
+	if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+		return "image/webp"
+	return "image/jpeg"
 
 
 @router.get("/{book_id}/events")

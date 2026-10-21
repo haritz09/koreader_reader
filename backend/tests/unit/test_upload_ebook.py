@@ -8,7 +8,16 @@ from core.application.use_cases.process_ebook import (
     InvalidEbookError,
     UploadEbookUseCase,
 )
+from core.ports.ebook_metadata import EbookMetadata
 from tests.fixtures.epub import valid_epub_bytes
+
+
+class FakeMetadataReader:
+    def __init__(self, title: str | None = None, author: str | None = None) -> None:
+        self.metadata = EbookMetadata(title=title, author=author)
+
+    async def read_metadata(self, storage_path: str) -> EbookMetadata:
+        return self.metadata
 
 
 class FakeBookRepository:
@@ -16,11 +25,14 @@ class FakeBookRepository:
         self.existing = existing
         self.created = None
         self.pending: list[str] = []
+        self.metadata: list[tuple[str, str | None, str | None]] = []
 
     async def get_by_document_hash(self, document_hash: str):
         return self.existing
 
-    async def create(self, book_id: str, document_hash: str, storage_key: str):
+    async def get_or_create(self, book_id: str, document_hash: str, storage_key: str):
+        if self.existing is not None:
+            return self.existing, False
         self.created = type(
             "Book",
             (),
@@ -29,12 +41,19 @@ class FakeBookRepository:
                 "document_hash": document_hash,
                 "storage_key": storage_key,
                 "processing_status": "pending",
+                "title": None,
+                "author": None,
             },
         )()
-        return self.created
+        return self.created, True
 
     async def mark_pending(self, book_id: str) -> None:
         self.pending.append(book_id)
+
+    async def set_metadata(
+        self, book_id: str, title: str | None, author: str | None
+    ) -> None:
+        self.metadata.append((book_id, title, author))
 
 
 class FakeLibraryRepository:
@@ -71,7 +90,9 @@ def test_upload_stores_md5_and_enqueues_processing() -> None:
     storage = FakeStorage()
     queue = FakeQueue()
     library = FakeLibraryRepository()
-    use_case = UploadEbookUseCase(repository, storage, queue, library)
+    use_case = UploadEbookUseCase(
+        repository, storage, queue, library, FakeMetadataReader()
+    )
 
     result = asyncio.run(use_case.execute(content, "owner-1"))
 
@@ -92,13 +113,17 @@ def test_upload_reuses_existing_book_without_reprocessing() -> None:
             "document_hash": "known-hash",
             "storage_key": "books/existing-book.epub",
             "processing_status": "ready",
+            "title": "Known title",
+            "author": "Known author",
         },
     )()
     repository = FakeBookRepository(existing)
     storage = FakeStorage()
     queue = FakeQueue()
     library = FakeLibraryRepository()
-    use_case = UploadEbookUseCase(repository, storage, queue, library)
+    use_case = UploadEbookUseCase(
+        repository, storage, queue, library, FakeMetadataReader()
+    )
 
     content = valid_epub_bytes()
     repository.existing.document_hash = hashlib.md5(content).hexdigest()
@@ -119,13 +144,17 @@ def test_reuploading_a_failed_book_reprocesses_it_in_place() -> None:
             "document_hash": "known-hash",
             "storage_key": "books/existing-book.epub",
             "processing_status": "failed",
+            "title": None,
+            "author": None,
         },
     )()
     repository = FakeBookRepository(existing)
     storage = FakeStorage()
     queue = FakeQueue()
     library = FakeLibraryRepository()
-    use_case = UploadEbookUseCase(repository, storage, queue, library)
+    use_case = UploadEbookUseCase(
+        repository, storage, queue, library, FakeMetadataReader()
+    )
 
     content = valid_epub_bytes()
     repository.existing.document_hash = hashlib.md5(content).hexdigest()
@@ -140,7 +169,11 @@ def test_reuploading_a_failed_book_reprocesses_it_in_place() -> None:
 
 def test_upload_rejects_non_epub_content() -> None:
     use_case = UploadEbookUseCase(
-        FakeBookRepository(), FakeStorage(), FakeQueue(), FakeLibraryRepository()
+        FakeBookRepository(),
+        FakeStorage(),
+        FakeQueue(),
+        FakeLibraryRepository(),
+        FakeMetadataReader(),
     )
 
     with pytest.raises(InvalidEbookError):
@@ -149,7 +182,11 @@ def test_upload_rejects_non_epub_content() -> None:
 
 def test_upload_rejects_structurally_invalid_epub_archive() -> None:
     use_case = UploadEbookUseCase(
-        FakeBookRepository(), FakeStorage(), FakeQueue(), FakeLibraryRepository()
+        FakeBookRepository(),
+        FakeStorage(),
+        FakeQueue(),
+        FakeLibraryRepository(),
+        FakeMetadataReader(),
     )
 
     with pytest.raises(InvalidEbookError):
@@ -163,6 +200,7 @@ def test_upload_rejects_content_above_configured_limit() -> None:
         FakeStorage(),
         FakeQueue(),
         FakeLibraryRepository(),
+        FakeMetadataReader(),
         max_size_bytes=len(content) - 1,
     )
 
