@@ -23,6 +23,15 @@ pytestmark = pytest.mark.postgres
 
 
 class _ChunkTaggingLLMProvider:
+    async def extract_knowledge_batch(
+        self,
+        chunks: list[tuple[str, str]],
+    ) -> dict[str, KnowledgeExtractionResult]:
+        return {
+            chunk_id: await self.extract_knowledge(text)
+            for chunk_id, text in chunks
+        }
+
     async def extract_knowledge(self, chunk_text: str) -> KnowledgeExtractionResult:
         return KnowledgeExtractionResult(
             entities=[

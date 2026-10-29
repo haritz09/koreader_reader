@@ -101,9 +101,6 @@ class UploadEbookUseCase:
 				document_hash=book.document_hash,
 				processing_status="pending",
 			)
-		if book.title is None:
-			saved_path = await self._storage.save(book.storage_key, content)
-			await self._apply_metadata(book, saved_path)
 		return EbookUploadResult(
 			book_id=book.id,
 			document_hash=book.document_hash,

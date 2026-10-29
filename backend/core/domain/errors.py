@@ -20,3 +20,7 @@ class BookProcessingError(Exception):
         super().__init__(
             f"Book {book_id} is processing and cannot be deleted"
         )
+
+
+class KnowledgeExtractionError(Exception):
+    pass

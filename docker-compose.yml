@@ -40,6 +40,8 @@ services:
       dockerfile: Dockerfile
     command: arq workers.worker.WorkerSettings
     working_dir: /app/backend
+    env_file:
+      - backend/.env
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/ebook_analyzer
       REDIS_URL: redis://redis:6379

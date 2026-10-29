@@ -12,6 +12,14 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str = "https://api.openai.com/v1"
+    llm_fallback_models: str = ""
+    extraction_concurrency: int = 2
+    extraction_max_attempts: int = 3
+    extraction_retry_base_seconds: float = 1.0
+    extraction_retry_max_seconds: float = 20.0
+    extraction_requests_per_minute: int = 5
+    extraction_batch_size: int = 3
+    extraction_job_timeout_seconds: int = 3600
 
     jwt_secret: str = "dev-insecure-secret-change-me-use-a-real-one"
     jwt_algorithm: str = "HS256"

@@ -1,9 +1,18 @@
 import asyncio
 import json
 
+import httpx
+import pytest
+
 from adapters.llm.openai_provider import MAX_ALIASES, OpenAIProvider
 from core.config import settings
 from core.domain.entities.knowledge import ENTITY_TYPES, FALLBACK_ENTITY_TYPE
+from core.ports.llm_provider import (
+    LLMConfigurationError,
+    LLMPermanentError,
+    LLMQuotaExhaustedError,
+    LLMTransientError,
+)
 
 
 def parse(payload: dict) -> dict:
@@ -20,17 +29,11 @@ def entity(**overrides) -> dict:
     return {"name": "Vin", "entity_type": "character", **overrides}
 
 
-def test_without_an_api_key_no_knowledge_is_extracted(monkeypatch) -> None:
+def test_without_an_api_key_extraction_fails_as_configuration_error(monkeypatch) -> None:
     monkeypatch.setattr(settings, "llm_api_key", "")
 
-    result = asyncio.run(OpenAIProvider().extract_knowledge("some chunk text"))
-
-    assert (result.entities, result.facts, result.events, result.locations) == (
-        [],
-        [],
-        [],
-        [],
-    )
+    with pytest.raises(LLMConfigurationError):
+        asyncio.run(OpenAIProvider().extract_knowledge("some chunk text"))
 
 
 def test_entity_type_is_kept_when_it_belongs_to_the_vocabulary() -> None:
@@ -172,10 +175,165 @@ def test_a_fact_without_subject_and_object_still_survives() -> None:
     assert parsed.object is None
 
 
-def test_a_malformed_or_non_object_payload_yields_nothing() -> None:
-    assert OpenAIProvider._parse_response("not json").entities == []
-    assert OpenAIProvider._parse_response("[1, 2, 3]").facts == []
-    assert OpenAIProvider._parse_response('"text"').events == []
+def test_a_malformed_or_non_object_payload_is_transient() -> None:
+    for content in ("not json", "[1, 2, 3]", '"text"'):
+        with pytest.raises(LLMTransientError):
+            OpenAIProvider._parse_response(content)
+
+
+def test_a_batch_response_keeps_each_chunk_separate() -> None:
+    payload = {
+        "chunks": [
+            {"chunk_id": "c1", "entities": [entity()]},
+            {"chunk_id": "c2", "facts": [{"statement": "A later fact."}]},
+        ]
+    }
+
+    results = OpenAIProvider._parse_batch_response(
+        json.dumps(payload),
+        {"c1", "c2"},
+    )
+
+    assert results["c1"].entities[0].name == "Vin"
+    assert results["c1"].facts == []
+    assert results["c2"].entities == []
+    assert results["c2"].facts[0].statement == "A later fact."
+
+
+def test_a_batch_response_must_contain_every_expected_chunk_once() -> None:
+    incomplete = {"chunks": [{"chunk_id": "c1"}]}
+    duplicate = {
+        "chunks": [
+            {"chunk_id": "c1"},
+            {"chunk_id": "c1"},
+        ]
+    }
+    unknown = {"chunks": [{"chunk_id": "c1"}, {"chunk_id": "other"}]}
+
+    for payload in (incomplete, duplicate, unknown):
+        with pytest.raises(LLMTransientError):
+            OpenAIProvider._parse_batch_response(
+                json.dumps(payload),
+                {"c1", "c2"},
+            )
+
+
+def test_a_per_day_quota_failure_is_not_treated_as_a_rate_limit() -> None:
+    response = httpx.Response(
+        429,
+        json={
+            "error": {
+                "code": 429,
+                "message": "Quota exceeded.",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                        "violations": [
+                            {
+                                "quotaId": (
+                                    "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+                                )
+                            }
+                        ],
+                    },
+                    {
+                        "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                        "retryDelay": "3600s",
+                    },
+                ],
+            }
+        },
+        request=httpx.Request("POST", "https://example.test"),
+    )
+
+    with pytest.raises(LLMQuotaExhaustedError) as error:
+        OpenAIProvider._raise_for_status(response)
+
+    assert error.value.retry_after == 3600.0
+
+
+def test_a_per_minute_quota_failure_stays_transient() -> None:
+    response = httpx.Response(
+        429,
+        json={
+            "error": {
+                "code": 429,
+                "message": "Quota exceeded.",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                        "violations": [
+                            {
+                                "quotaId": (
+                                    "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
+                                )
+                            }
+                        ],
+                    },
+                    {
+                        "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                        "retryDelay": "30s",
+                    },
+                ],
+            }
+        },
+        request=httpx.Request("POST", "https://example.test"),
+    )
+
+    with pytest.raises(LLMTransientError) as error:
+        OpenAIProvider._raise_for_status(response)
+
+    assert error.value.retry_after == 30.0
+
+
+def test_a_long_retry_after_without_quota_details_is_daily_quota() -> None:
+    response = httpx.Response(
+        429,
+        headers={"Retry-After": "7200"},
+        request=httpx.Request("POST", "https://example.test"),
+    )
+
+    with pytest.raises(LLMQuotaExhaustedError) as error:
+        OpenAIProvider._raise_for_status(response)
+
+    assert error.value.retry_after == 7200.0
+
+
+def test_auth_and_configuration_failures_abort_the_book() -> None:
+    for status in (401, 403, 404, 422):
+        response = httpx.Response(
+            status,
+            request=httpx.Request("POST", "https://example.test"),
+        )
+
+        with pytest.raises(LLMConfigurationError):
+            OpenAIProvider._raise_for_status(response)
+
+
+def test_rate_limits_and_server_errors_are_transient() -> None:
+    response = httpx.Response(
+        429,
+        headers={"Retry-After": "7"},
+        request=httpx.Request("POST", "https://example.test"),
+    )
+
+    with pytest.raises(LLMTransientError) as error:
+        OpenAIProvider._raise_for_status(response)
+
+    assert error.value.retry_after == 7.0
+
+    for status in (408, 500, 503):
+        with pytest.raises(LLMTransientError):
+            OpenAIProvider._raise_for_status(
+                httpx.Response(status, request=httpx.Request("POST", "https://example.test"))
+            )
+
+
+def test_other_client_errors_are_permanent() -> None:
+    with pytest.raises(LLMPermanentError):
+        OpenAIProvider._raise_for_status(
+            httpx.Response(400, request=httpx.Request("POST", "https://example.test"))
+        )
 
 
 def test_non_list_and_non_dict_rows_are_tolerated() -> None:

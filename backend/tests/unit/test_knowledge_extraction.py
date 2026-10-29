@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from core.domain.entities.chunk import Chunk
 from core.domain.entities.knowledge import (
     Entity,
@@ -10,17 +12,29 @@ from core.domain.entities.knowledge import (
     KnowledgeExtractionResult,
     Location,
 )
+from core.domain.errors import KnowledgeExtractionError
+from core.ports.llm_provider import (
+    LLMConfigurationError,
+    LLMQuotaExhaustedError,
+    LLMTransientError,
+)
 from core.services.knowledge_extraction import KnowledgeExtractionService
 
 
 class FakeLLMProvider:
     def __init__(self, result: KnowledgeExtractionResult) -> None:
         self._result = result
-        self.call_count = 0
+        self.batch_sizes: list[int] = []
 
     async def extract_knowledge(self, chunk_text: str) -> KnowledgeExtractionResult:
-        self.call_count += 1
         return self._result
+
+    async def extract_knowledge_batch(
+        self,
+        chunks: list[tuple[str, str]],
+    ) -> dict[str, KnowledgeExtractionResult]:
+        self.batch_sizes.append(len(chunks))
+        return {chunk_id: self._result for chunk_id, _ in chunks}
 
 
 class FakeKnowledgeRepository:
@@ -45,6 +59,16 @@ def _make_chunk(index: int = 0) -> Chunk:
     )
 
 
+def _service(
+    llm: object,
+    repo: FakeKnowledgeRepository,
+    **kwargs: object,
+) -> KnowledgeExtractionService:
+    return KnowledgeExtractionService(
+        llm, repo, requests_per_minute=0, **kwargs
+    )
+
+
 def _extraction_result() -> KnowledgeExtractionResult:
     return KnowledgeExtractionResult(
         entities=[
@@ -62,18 +86,20 @@ def _extraction_result() -> KnowledgeExtractionResult:
     )
 
 
-def test_extract_from_chunks_calls_llm_for_each_chunk() -> None:
+def test_extract_from_chunks_batches_chunks_in_groups_of_three() -> None:
     async def _run() -> None:
         result = _extraction_result()
         llm = FakeLLMProvider(result)
         repo = FakeKnowledgeRepository()
-        service = KnowledgeExtractionService(llm, repo)
+        service = _service(llm, repo)
 
-        chunks = [("chunk-1", _make_chunk(0)), ("chunk-2", _make_chunk(1))]
+        chunks = [(f"chunk-{index}", _make_chunk(index)) for index in range(7)]
         await service.extract_from_chunks("book-1", chunks)
 
-        assert llm.call_count == 2
-        assert len(repo.inserted) == 2
+        assert len(llm.batch_sizes) == 3
+        assert max(llm.batch_sizes) == 3
+        assert sum(llm.batch_sizes) == 7
+        assert len(repo.inserted) == 7
 
     asyncio.run(_run())
 
@@ -83,7 +109,7 @@ def test_extract_from_chunks_tags_with_book_id_and_chunk_id() -> None:
         result = _extraction_result()
         llm = FakeLLMProvider(result)
         repo = FakeKnowledgeRepository()
-        service = KnowledgeExtractionService(llm, repo)
+        service = _service(llm, repo)
 
         await service.extract_from_chunks("book-1", [("chunk-42", _make_chunk(0))])
 
@@ -110,7 +136,7 @@ def test_extract_from_chunks_sets_reading_position_from_chunk() -> None:
         result = _extraction_result()
         llm = FakeLLMProvider(result)
         repo = FakeKnowledgeRepository()
-        service = KnowledgeExtractionService(llm, repo)
+        service = _service(llm, repo)
 
         chunk_with_pctg = Chunk(
             chapter_id="ch-1",
@@ -128,19 +154,148 @@ def test_extract_from_chunks_sets_reading_position_from_chunk() -> None:
     asyncio.run(_run())
 
 
-def test_extract_from_chunks_continues_on_llm_failure() -> None:
+def test_extract_from_chunks_fails_when_all_chunks_fail() -> None:
     async def _run() -> None:
         class FailingLLM:
-            async def extract_knowledge(self, chunk_text: str) -> KnowledgeExtractionResult:
+            async def extract_knowledge_batch(
+                self,
+                chunks: list[tuple[str, str]],
+            ) -> dict[str, KnowledgeExtractionResult]:
                 raise RuntimeError("API down")
 
         repo = FakeKnowledgeRepository()
-        service = KnowledgeExtractionService(FailingLLM(), repo)
+        service = _service(FailingLLM(), repo, max_attempts=1)
 
         chunks = [("c1", _make_chunk(0)), ("c2", _make_chunk(1))]
-        await service.extract_from_chunks("book-1", chunks)
+        with pytest.raises(KnowledgeExtractionError):
+            await service.extract_from_chunks("book-1", chunks)
 
         assert len(repo.inserted) == 0
+
+    asyncio.run(_run())
+
+
+def test_extract_from_chunks_retries_transient_failures() -> None:
+    async def _run() -> None:
+        class FlakyLLM:
+            def __init__(self) -> None:
+                self.call_count = 0
+
+            async def extract_knowledge_batch(
+                self,
+                chunks: list[tuple[str, str]],
+            ) -> dict[str, KnowledgeExtractionResult]:
+                self.call_count += 1
+                if self.call_count < 3:
+                    raise LLMTransientError("rate limited")
+                return {
+                    chunk_id: _extraction_result() for chunk_id, _ in chunks
+                }
+
+        llm = FlakyLLM()
+        repo = FakeKnowledgeRepository()
+        service = _service(
+            llm,
+            repo,
+            max_attempts=3,
+            retry_base_seconds=0,
+            retry_max_seconds=0,
+        )
+
+        summary = await service.extract_from_chunks("book-1", [("c1", _make_chunk())])
+
+        assert llm.call_count == 3
+        assert summary.succeeded == 1
+        assert summary.failed == 0
+        assert len(repo.inserted) == 1
+
+    asyncio.run(_run())
+
+
+def test_extract_from_chunks_does_not_retry_configuration_errors() -> None:
+    async def _run() -> None:
+        class MisconfiguredLLM:
+            def __init__(self) -> None:
+                self.call_count = 0
+
+            async def extract_knowledge_batch(
+                self,
+                chunks: list[tuple[str, str]],
+            ) -> dict[str, KnowledgeExtractionResult]:
+                self.call_count += 1
+                raise LLMConfigurationError("invalid key")
+
+        llm = MisconfiguredLLM()
+        repo = FakeKnowledgeRepository()
+        service = _service(llm, repo, max_attempts=3)
+
+        with pytest.raises(LLMConfigurationError):
+            await service.extract_from_chunks("book-1", [("c1", _make_chunk())])
+
+        assert llm.call_count == 1
+
+    asyncio.run(_run())
+
+
+def test_extract_from_chunks_aborts_on_daily_quota_after_a_successful_batch() -> None:
+    async def _run() -> None:
+        class QuotaLLM:
+            def __init__(self) -> None:
+                self.call_count = 0
+
+            async def extract_knowledge_batch(
+                self,
+                chunks: list[tuple[str, str]],
+            ) -> dict[str, KnowledgeExtractionResult]:
+                self.call_count += 1
+                if self.call_count == 2:
+                    raise LLMQuotaExhaustedError("daily quota exhausted", 3600)
+                return {
+                    chunk_id: _extraction_result() for chunk_id, _ in chunks
+                }
+
+        llm = QuotaLLM()
+        repo = FakeKnowledgeRepository()
+        service = _service(llm, repo, concurrency=1, batch_size=3)
+        chunks = [(f"c{index}", _make_chunk(index)) for index in range(4)]
+
+        with pytest.raises(LLMQuotaExhaustedError):
+            await service.extract_from_chunks("book-1", chunks)
+
+        assert llm.call_count == 2
+        assert len(repo.inserted) == 3
+
+    asyncio.run(_run())
+
+
+def test_extract_from_chunks_limits_concurrency() -> None:
+    async def _run() -> None:
+        class TrackingLLM:
+            def __init__(self) -> None:
+                self.active = 0
+                self.max_active = 0
+
+            async def extract_knowledge_batch(
+                self,
+                chunks: list[tuple[str, str]],
+            ) -> dict[str, KnowledgeExtractionResult]:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+                await asyncio.sleep(0.01)
+                self.active -= 1
+                return {
+                    chunk_id: _extraction_result() for chunk_id, _ in chunks
+                }
+
+        llm = TrackingLLM()
+        repo = FakeKnowledgeRepository()
+        service = _service(llm, repo, concurrency=2)
+        chunks = [(f"c{index}", _make_chunk(index)) for index in range(7)]
+
+        summary = await service.extract_from_chunks("book-1", chunks)
+
+        assert summary.succeeded == 7
+        assert llm.max_active <= 2
 
     asyncio.run(_run())
 
@@ -150,7 +305,7 @@ def test_extract_from_chunks_assigns_unique_ids() -> None:
         result = _extraction_result()
         llm = FakeLLMProvider(result)
         repo = FakeKnowledgeRepository()
-        service = KnowledgeExtractionService(llm, repo)
+        service = _service(llm, repo)
 
         await service.extract_from_chunks("book-1", [("c1", _make_chunk(0))])
 

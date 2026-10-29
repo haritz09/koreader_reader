@@ -5,6 +5,7 @@ import pytest
 
 import workers.worker as worker_module
 from core.config import settings
+from core.ports.llm_provider import LLMConfigurationError, LLMQuotaExhaustedError
 
 
 class FakeSessionContext:
@@ -65,6 +66,12 @@ def make_ctx(
 			from core.domain.entities.knowledge import KnowledgeExtractionResult
 			return KnowledgeExtractionResult(entities=[], facts=[], events=[], locations=[])
 
+		async def extract_knowledge_batch(self, chunks):
+			return {
+				chunk_id: await self.extract_knowledge(text)
+				for chunk_id, text in chunks
+			}
+
 	return {
 		"parser": FakeParser(),
 		"storage": FakeStorage(),
@@ -117,8 +124,60 @@ def test_worker_reraises_processing_failure_for_arq_retry(monkeypatch) -> None:
 	]
 
 
+def test_worker_marks_configuration_errors_failed_without_retry(monkeypatch) -> None:
+	repository = FakeRepository()
+	configure_worker(monkeypatch, repository)
+	monkeypatch.setattr(worker_module, "chunk_chapters", lambda chapters: [])
+
+	class FailingExtraction:
+		def __init__(self, *args, **kwargs) -> None:
+			pass
+
+		async def extract_from_chunks(self, book_id, chunks) -> None:
+			raise LLMConfigurationError("invalid key")
+
+	monkeypatch.setattr(worker_module, "KnowledgeExtractionService", FailingExtraction)
+	ctx = make_ctx(repository)
+
+	asyncio.run(worker_module.process_ebook(ctx, "book-123", "books/book-123.epub"))
+
+	assert repository.calls == [
+		("processing", "book-123"),
+		("replace", "book-123"),
+		("failed", "invalid key"),
+	]
+
+
 def test_worker_allows_three_attempts_for_retryable_jobs() -> None:
 	assert worker_module.WorkerSettings.max_tries == 3
+
+
+def test_worker_marks_quota_exhaustion_failed_without_retry(monkeypatch) -> None:
+	repository = FakeRepository()
+	configure_worker(monkeypatch, repository)
+	monkeypatch.setattr(worker_module, "chunk_chapters", lambda chapters: [])
+
+	class ExhaustedExtraction:
+		def __init__(self, *args, **kwargs) -> None:
+			pass
+
+		async def extract_from_chunks(self, book_id, chunks) -> None:
+			raise LLMQuotaExhaustedError("All configured models exhausted", 3600)
+
+	monkeypatch.setattr(worker_module, "KnowledgeExtractionService", ExhaustedExtraction)
+	ctx = make_ctx(repository)
+
+	asyncio.run(worker_module.process_ebook(ctx, "book-123", "books/book-123.epub"))
+
+	assert repository.calls == [
+		("processing", "book-123"),
+		("replace", "book-123"),
+		("failed", "All configured models exhausted"),
+	]
+
+
+def test_worker_uses_the_configured_extraction_timeout() -> None:
+	assert worker_module.WorkerSettings.job_timeout == settings.extraction_job_timeout_seconds
 
 
 def test_worker_connects_to_the_configured_redis() -> None:
