@@ -7,6 +7,7 @@ from typing import ClassVar
 from arq.connections import RedisSettings
 
 from adapters.llm.failover_provider import FailoverLLMProvider
+from adapters.llm.mock_provider import MockLLMProvider
 from adapters.llm.openai_provider import OpenAIProvider
 from adapters.queue.arq_graph_queue import ArqGraphGenerationQueue
 from adapters.storage.epub_parser import EpubParser
@@ -29,18 +30,31 @@ def _llm_models() -> list[str]:
 	return list(dict.fromkeys(model.strip() for model in models if model.strip()))
 
 
+def _build_llm_provider() -> FailoverLLMProvider | MockLLMProvider:
+	if settings.llm_provider == "mock":
+		if not settings.allow_mock_llm:
+			raise RuntimeError(
+				"LLM_PROVIDER=mock requires ALLOW_MOCK_LLM=true"
+			)
+		logger.warning(
+			"Mock LLM provider enabled; extraction will return empty knowledge"
+		)
+		return MockLLMProvider()
+	return FailoverLLMProvider(
+		[OpenAIProvider(model=model) for model in _llm_models()]
+	)
+
+
 async def startup(ctx: dict) -> None:
 	ctx["parser"] = EpubParser()
 	ctx["storage"] = LocalEbookStorage(Path(settings.ebook_storage_path))
-	ctx["llm_provider"] = FailoverLLMProvider(
-		[OpenAIProvider(model=model) for model in _llm_models()]
-	)
+	ctx["llm_provider"] = _build_llm_provider()
 
 
 async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 	parser: EpubParser = ctx["parser"]
 	storage: LocalEbookStorage = ctx["storage"]
-	llm_provider: FailoverLLMProvider = ctx["llm_provider"]
+	llm_provider: FailoverLLMProvider | MockLLMProvider = ctx["llm_provider"]
 	storage_path = str(Path(settings.ebook_storage_path) / storage_key)
 
 	async with session_factory() as session:
@@ -106,14 +120,8 @@ async def _enqueue_graph_generation(book_id: str) -> None:
 
 
 async def generate_graph(ctx: dict, book_id: str) -> None:
-	"""Refresh entity identity for a book so graph nodes merge across chunks.
-
-	This is an optimization, not a gate. The graph read filters by the stored
-	reading position on every request and derives node labels from visible
-	mentions only, so a failed or skipped run costs freshness and never leaks a
-	future mention.
-	"""
-	llm_provider: FailoverLLMProvider = ctx["llm_provider"]
+	"""Refresh entity identity for a book so graph nodes merge across chunks."""
+	llm_provider: FailoverLLMProvider | MockLLMProvider = ctx["llm_provider"]
 
 	async with session_factory() as session:
 		book_repository = PostgresBookRepository(session)

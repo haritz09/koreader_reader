@@ -82,6 +82,9 @@ httpOnly cookie; a device without a browser, such as KOReader, sends the token a
 # Full stack with Docker
 docker compose up -d --build
 
+# E2E stack
+docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build
+
 # Tests (from backend/)
 python -m pytest tests/                    # without external services
 python -m pytest tests/ -m postgres         # with PostgreSQL
@@ -96,4 +99,4 @@ ruff check .
 - **Lint**: ruff on PR and push to main
 - **Unit + Contract**: pytest without services
 - **PostgreSQL**: pytest with PostgreSQL 16
-- **E2E**: only on main and manual dispatch, builds full Compose image
+- **E2E**: only on main and manual dispatch; builds `docker-compose.yml` plus `docker-compose.e2e.yml`, which selects the mock LLM provider

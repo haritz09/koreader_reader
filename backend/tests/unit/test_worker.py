@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 import pytest
 
 import workers.worker as worker_module
+from adapters.llm.mock_provider import MockLLMProvider
 from core.config import settings
 from core.ports.llm_provider import LLMConfigurationError, LLMQuotaExhaustedError
 

@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str = "https://api.openai.com/v1"
     llm_fallback_models: str = ""
+    llm_provider: Literal["openai", "mock"] = "openai"
+    allow_mock_llm: bool = False
     extraction_concurrency: int = 2
     extraction_max_attempts: int = 3
     extraction_retry_base_seconds: float = 1.0
