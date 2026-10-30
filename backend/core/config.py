@@ -10,9 +10,9 @@ class Settings(BaseSettings):
     ebook_storage_path: str = "./data/ebooks"
     max_ebook_size_bytes: int = 10 * 1024 * 1024
     llm_api_key: str = ""
-    llm_model: str = "gpt-4o-mini"
-    llm_base_url: str = "https://api.openai.com/v1"
-    llm_fallback_models: str = ""
+    llm_model: str = "gemini-2.5-flash"
+    llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    llm_fallback_models: str = "gemini-2.5-flash-lite"
     llm_provider: Literal["openai", "mock"] = "openai"
     allow_mock_llm: bool = False
     extraction_concurrency: int = 2
