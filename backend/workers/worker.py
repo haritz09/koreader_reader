@@ -6,6 +6,7 @@ from typing import ClassVar
 
 from arq.connections import RedisSettings
 
+from adapters.events.redis_book_status import RedisBookStatusPublisher
 from adapters.llm.failover_provider import FailoverLLMProvider
 from adapters.llm.mock_provider import MockLLMProvider
 from adapters.llm.openai_provider import OpenAIProvider
@@ -13,6 +14,8 @@ from adapters.queue.arq_graph_queue import ArqGraphGenerationQueue
 from adapters.storage.epub_parser import EpubParser
 from adapters.storage.local_ebook_storage import LocalEbookStorage
 from core.config import settings
+from core.domain.status import FAILED, GRAPH_STATUSES, PARTIAL, PROCESSING, READY
+from core.ports.book_status_events import BookStatusPublisher
 from core.ports.llm_provider import LLMConfigurationError, LLMQuotaExhaustedError
 from core.services.chunking import chunk_chapters
 from core.services.entity_resolution import EntityResolutionService
@@ -49,18 +52,41 @@ async def startup(ctx: dict) -> None:
 	ctx["parser"] = EpubParser()
 	ctx["storage"] = LocalEbookStorage(Path(settings.ebook_storage_path))
 	ctx["llm_provider"] = _build_llm_provider()
+	ctx["status_publisher"] = RedisBookStatusPublisher(settings.redis_url)
+
+
+async def shutdown(ctx: dict) -> None:
+	publisher: BookStatusPublisher | None = ctx.get("status_publisher")
+	if publisher is not None:
+		await publisher.aclose()
+
+
+async def _publish_status(
+	publisher: BookStatusPublisher | None,
+	book_id: str,
+	status: str,
+	error: str | None = None,
+) -> None:
+	if publisher is None:
+		return
+	try:
+		await publisher.publish(book_id, status, error)
+	except Exception:
+		logger.exception("Could not publish %s status for book %s", status, book_id)
 
 
 async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 	parser: EpubParser = ctx["parser"]
 	storage: LocalEbookStorage = ctx["storage"]
 	llm_provider: FailoverLLMProvider | MockLLMProvider = ctx["llm_provider"]
+	publisher: BookStatusPublisher | None = ctx.get("status_publisher")
 	storage_path = str(Path(settings.ebook_storage_path) / storage_key)
 
 	async with session_factory() as session:
 		repository = PostgresBookRepository(session)
 		knowledge_repo = PostgresKnowledgeRepository(session)
 		await repository.mark_processing(book_id)
+		await _publish_status(publisher, book_id, PROCESSING)
 		try:
 			chapters = await parser.parse(storage_path)
 			cover_content = await parser.extract_cover(storage_path)
@@ -68,8 +94,9 @@ async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 				cover_key = f"{book_id}/cover.jpg"
 				cover_path = await storage.save(cover_key, cover_content)
 				await repository.set_cover_path(book_id, cover_path)
-		except Exception as error:  # noqa: BLE001 - any parse failure must mark the book failed
+		except Exception as error:  # noqa: BLE001
 			await repository.mark_failed(book_id, str(error))
+			await _publish_status(publisher, book_id, FAILED, str(error))
 			return
 
 		chunks = chunk_chapters(chapters)
@@ -92,13 +119,23 @@ async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 			)
 			summary = await extraction.extract_from_chunks(book_id, chunks_with_ids)
 			logger.info("Book %s extraction summary: %s", book_id, summary)
-			await repository.mark_ready(book_id)
-			await storage.delete(storage_key)
+			if summary.failed:
+				error = summary.error or (
+					f"{summary.failed} of {summary.total} chunks failed extraction"
+				)
+				await repository.mark_partial(book_id, error)
+				await _publish_status(publisher, book_id, PARTIAL, error)
+			else:
+				await storage.delete(storage_key)
+				await repository.mark_ready(book_id)
+				await _publish_status(publisher, book_id, READY)
 		except (LLMConfigurationError, LLMQuotaExhaustedError) as error:
 			await repository.mark_failed(book_id, str(error))
+			await _publish_status(publisher, book_id, FAILED, str(error))
 			return
 		except Exception as error:
 			await repository.mark_failed(book_id, str(error))
+			await _publish_status(publisher, book_id, FAILED, str(error))
 			if isinstance(error, (ValueError, EOFError)):
 				return
 			raise
@@ -107,12 +144,6 @@ async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 
 
 async def _enqueue_graph_generation(book_id: str) -> None:
-	"""Queue a first resolution pass once extraction has finished.
-
-	Progress sync also queues this, but only when the reader moves forward, so a
-	book that is uploaded and opened at position zero would otherwise show
-	unmerged nodes until the first advance.
-	"""
 	try:
 		await ArqGraphGenerationQueue(settings.redis_url).enqueue(book_id)
 	except Exception:
@@ -131,7 +162,7 @@ async def generate_graph(ctx: dict, book_id: str) -> None:
 		if state is None:
 			logger.warning("Graph generation skipped, book %s does not exist", book_id)
 			return
-		if state.processing_status != "ready":
+		if state.processing_status not in GRAPH_STATUSES:
 			logger.info(
 				"Graph generation skipped for book %s in status %s",
 				book_id,
@@ -166,6 +197,7 @@ async def generate_graph(ctx: dict, book_id: str) -> None:
 class WorkerSettings:
 	functions: ClassVar[list] = [process_ebook, generate_graph]
 	on_startup = startup
+	on_shutdown = shutdown
 	max_tries = 3
 	job_timeout = settings.extraction_job_timeout_seconds
 	redis_settings = RedisSettings.from_dsn(settings.redis_url)

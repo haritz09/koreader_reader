@@ -31,6 +31,7 @@ class ExtractionSummary:
     facts: int
     events: int
     locations: int
+    error: str | None = None
 
 
 class _RateLimiter:
@@ -109,11 +110,21 @@ class KnowledgeExtractionService:
             chunks_with_ids[index : index + self._batch_size]
             for index in range(0, total, self._batch_size)
         ]
+        logger.info(
+            "Knowledge extraction started: book=%s chunks=%d batches=%d batch_size=%d "
+            "concurrency=%d",
+            book_id,
+            total,
+            len(batches),
+            self._batch_size,
+            self._concurrency,
+        )
         tasks = [
             asyncio.create_task(self._extract_batch(batch, semaphore))
             for batch in batches
         ]
 
+        completed_batches = 0
         succeeded = 0
         failed = 0
         entities = 0
@@ -124,6 +135,7 @@ class KnowledgeExtractionService:
         try:
             for completed in asyncio.as_completed(tasks):
                 batch, results = await completed
+                completed_batches += 1
                 expected_ids = {chunk_id for chunk_id, _ in batch}
                 if results is None or set(results) != expected_ids:
                     failed += len(batch)
@@ -132,6 +144,17 @@ class KnowledgeExtractionService:
                             "Knowledge extraction returned an incomplete batch of %d chunks",
                             len(batch),
                         )
+                    logger.info(
+                        "Knowledge extraction progress: book=%s batches=%d/%d chunks=%d/%d "
+                        "succeeded=%d failed=%d",
+                        book_id,
+                        completed_batches,
+                        len(batches),
+                        succeeded + failed,
+                        total,
+                        succeeded,
+                        failed,
+                    )
                     continue
 
                 for chunk_id, chunk in batch:
@@ -148,13 +171,64 @@ class KnowledgeExtractionService:
                     facts += len(tagged.facts)
                     events += len(tagged.events)
                     locations += len(tagged.locations)
-        except BaseException:
+                logger.info(
+                    "Knowledge extraction progress: book=%s batches=%d/%d chunks=%d/%d "
+                    "succeeded=%d failed=%d",
+                    book_id,
+                    completed_batches,
+                    len(batches),
+                    succeeded + failed,
+                    total,
+                    succeeded,
+                    failed,
+                )
+        except BaseException as error:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            if isinstance(error, LLMQuotaExhaustedError) and succeeded:
+                failed = total - succeeded
+                logger.warning(
+                    "Knowledge extraction stopped at daily quota: book=%s total=%d "
+                    "succeeded=%d failed=%d",
+                    book_id,
+                    total,
+                    succeeded,
+                    failed,
+                )
+                return ExtractionSummary(
+                    total=total,
+                    succeeded=succeeded,
+                    failed=failed,
+                    entities=entities,
+                    facts=facts,
+                    events=events,
+                    locations=locations,
+                    error=(
+                        f"{error}; {failed} of {total} chunks were not extracted"
+                    ),
+                )
+            logger.warning(
+                "Knowledge extraction aborted: book=%s batches=%d/%d chunks=%d/%d "
+                "succeeded=%d failed=%d unprocessed=%d",
+                book_id,
+                completed_batches,
+                len(batches),
+                succeeded + failed,
+                total,
+                succeeded,
+                failed,
+                total - succeeded - failed,
+            )
             raise
 
         if succeeded == 0:
+            logger.error(
+                "Knowledge extraction failed: book=%s total=%d failed=%d",
+                book_id,
+                total,
+                failed,
+            )
             raise KnowledgeExtractionError(f"All {total} chunks failed extraction")
 
         summary = ExtractionSummary(
@@ -165,17 +239,21 @@ class KnowledgeExtractionService:
             facts=facts,
             events=events,
             locations=locations,
+            error=f"{failed} of {total} chunks failed extraction" if failed else None,
         )
         if failed:
             logger.warning(
-                "Knowledge extraction finished with failures: total=%d succeeded=%d failed=%d",
+                "Knowledge extraction finished with failures: book=%s total=%d "
+                "succeeded=%d failed=%d",
+                book_id,
                 total,
                 succeeded,
                 failed,
             )
         logger.info(
-            "Knowledge extraction finished: total=%d succeeded=%d failed=%d entities=%d "
-            "facts=%d events=%d locations=%d",
+            "Knowledge extraction finished: book=%s total=%d succeeded=%d failed=%d "
+            "entities=%d facts=%d events=%d locations=%d",
+            book_id,
             total,
             succeeded,
             failed,

@@ -2,6 +2,14 @@
 
 import { useState } from "react";
 import { deleteEbook, retryEbook } from "@/lib/api";
+import {
+  FAILED,
+  GRAPH_STATUSES,
+  PARTIAL,
+  PROCESSING,
+  READY,
+  RETRYABLE_STATUSES,
+} from "@/lib/status";
 import type { EbookStatusResponse } from "@/types/api";
 
 interface BookCardProps {
@@ -25,7 +33,9 @@ export function BookCard({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const progressPercent = Math.round(book.progress_position * 100);
-  const isProcessing = book.processing_status === "processing";
+  const isProcessing = book.processing_status === PROCESSING;
+  const canOpenGraph = GRAPH_STATUSES.has(book.processing_status);
+  const canRetry = RETRYABLE_STATUSES.has(book.processing_status);
 
   const closeMenu = () => {
     setMenuOpen(false);
@@ -43,13 +53,15 @@ export function BookCard({
   };
 
   const statusLabel =
-    book.processing_status === "ready"
+    book.processing_status === READY
       ? null
-      : book.processing_status === "processing"
+      : book.processing_status === PROCESSING
         ? "Procesando..."
-        : book.processing_status === "failed"
+        : book.processing_status === FAILED
           ? "Error"
-          : "Pendiente";
+          : book.processing_status === PARTIAL
+            ? "Extracción parcial"
+            : "Pendiente";
 
   const handleRetry = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -85,7 +97,9 @@ export function BookCard({
     <div
       className="group cursor-pointer animate-fade-in-up"
       style={{ animationDelay: `${index * 50}ms` }}
-      onClick={() => book.processing_status === "ready" && onSelect(book.book_id)}
+      onClick={() => {
+        if (canOpenGraph) onSelect(book.book_id);
+      }}
     >
       <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-gray-200 shadow-sm transition-all duration-200 group-hover:-translate-y-1 group-hover:shadow-md dark:bg-gray-800">
         {book.cover_url ? (
@@ -101,11 +115,14 @@ export function BookCard({
           </div>
         )}
         {statusLabel && (
-          <div className="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-white">
+          <div
+            title={book.processing_error ?? undefined}
+            className="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-white"
+          >
             {statusLabel}
           </div>
         )}
-        {book.processing_status === "failed" && (
+        {canRetry && (
           <button
             onClick={handleRetry}
             disabled={retrying}

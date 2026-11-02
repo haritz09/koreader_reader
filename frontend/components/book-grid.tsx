@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getBooks, streamBookEvents } from "@/lib/api";
+import { ACTIVE_STATUSES } from "@/lib/status";
 import type { EbookStatusResponse } from "@/types/api";
 import { BookCard } from "./book-card";
 import { AddBookCard } from "./add-book-card";
@@ -32,19 +33,22 @@ export function BookGrid({ onSelectBook }: BookGridProps) {
     fetchBooks();
   }, [fetchBooks]);
 
-  useEffect(() => {
-    const processingBooks = books.filter(
-      (b) => b.processing_status === "processing" || b.processing_status === "pending"
-    );
-    if (processingBooks.length === 0) return;
+  const processingBookIds = books
+    .filter((b) => ACTIVE_STATUSES.has(b.processing_status))
+    .map((b) => b.book_id)
+    .sort()
+    .join(",");
 
-    const cleanups = processingBooks.map((book) =>
+  useEffect(() => {
+    if (!processingBookIds) return;
+
+    const cleanups = processingBookIds.split(",").map((bookId) =>
       streamBookEvents(
-        book.book_id,
+        bookId,
         (status, error) => {
           setBooks((prev) =>
             prev.map((b) =>
-              b.book_id === book.book_id
+              b.book_id === bookId
                 ? { ...b, processing_status: status, processing_error: error }
                 : b
             )
@@ -55,7 +59,7 @@ export function BookGrid({ onSelectBook }: BookGridProps) {
     );
 
     return () => cleanups.forEach((fn) => fn());
-  }, [books, fetchBooks]);
+  }, [processingBookIds, fetchBooks]);
 
   const sortedBooks = [...books].sort((a, b) => {
     if (sortBy === "title") {

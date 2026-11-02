@@ -93,6 +93,16 @@ def test_moving_forward_queues_graph_generation() -> None:
     assert library.updates == [("book-1", 0.5)]
 
 
+def test_moving_forward_updates_a_partial_books_graph() -> None:
+    library = StubLibrary(state(0.2, processing_status="partial"))
+    queue = RecordingGraphQueue()
+
+    result = sync(library, queue, position=0.5)
+
+    assert queue.enqueued == ["book-1"]
+    assert result.graph_generation_queued is True
+
+
 def test_rewinding_does_not_queue_graph_generation() -> None:
     library = StubLibrary(state(0.9))
     queue = RecordingGraphQueue()

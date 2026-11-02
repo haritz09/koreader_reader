@@ -7,6 +7,7 @@ import uuid
 import zipfile
 from dataclasses import dataclass
 
+from core.domain.status import FAILED, PENDING
 from core.ports.book_repository import BookRepository
 from core.ports.ebook_metadata import EbookMetadataReader
 from core.ports.ebook_storage import EbookStorage
@@ -91,7 +92,7 @@ class UploadEbookUseCase:
 		self, book, content: bytes, owner_id: str
 	) -> EbookUploadResult:
 		await self._library.link(owner_id, book.id)
-		if book.processing_status == "failed":
+		if book.processing_status == FAILED:
 			saved_path = await self._storage.save(book.storage_key, content)
 			await self._repository.mark_pending(book.id)
 			await self._apply_metadata(book, saved_path)
@@ -99,7 +100,7 @@ class UploadEbookUseCase:
 			return EbookUploadResult(
 				book_id=book.id,
 				document_hash=book.document_hash,
-				processing_status="pending",
+				processing_status=PENDING,
 			)
 		return EbookUploadResult(
 			book_id=book.id,

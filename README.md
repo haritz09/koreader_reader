@@ -46,7 +46,7 @@ frontend/
 | GET | `/api/v1/ebooks/{id}` | Book status |
 | DELETE | `/api/v1/ebooks/{id}` | Remove a book from the caller's library (204; 409 while processing) |
 | GET | `/api/v1/ebooks/{id}/graph` | Anti-spoiler graph at current position |
-| GET | `/api/v1/ebooks/{id}/events` | SSE: processing status |
+| GET | `/api/v1/ebooks/{id}/events` | SSE: processing status (`ready`, `failed`, or `partial`) |
 | GET | `/api/v1/ebooks/{id}/position-events` | SSE: reading position change |
 | GET | `/api/v1/ebooks/{id}/cover` | Book cover |
 | POST | `/api/v1/ebooks/{id}/retry` | Retry processing (failed only) |

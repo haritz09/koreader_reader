@@ -1,8 +1,11 @@
+import { TERMINAL_STATUSES, type ProcessingStatus } from "@/lib/status";
 import type {
   EbookListResponse,
   EbookStatusResponse,
+  EbookUploadResponse,
   GraphResponse,
   KoreaderSyncResponse,
+  RetryEbookResponse,
   SessionResponse,
 } from "@/types/api";
 
@@ -60,7 +63,7 @@ export async function getSession(): Promise<SessionResponse> {
 export async function uploadEbook(
   file: File,
   onProgress?: (percent: number) => void
-): Promise<{ book_id: string; document_hash: string; processing_status: string }> {
+): Promise<EbookUploadResponse> {
   await ensureSession();
 
   return new Promise((resolve, reject) => {
@@ -114,25 +117,42 @@ export async function getGraph(bookId: string): Promise<GraphResponse> {
 
 export function streamBookEvents(
   bookId: string,
-  onStatus: (status: string, error: string | null) => void,
+  onStatus: (status: ProcessingStatus, error: string | null) => void,
   onDone: () => void
 ): () => void {
   const es = new EventSource(`${API_BASE}/ebooks/${bookId}/events`, {
     withCredentials: true,
   });
 
+  let closed = false;
+  const finish = () => {
+    if (closed) return;
+    closed = true;
+    es.close();
+    onDone();
+  };
+
   es.onmessage = (e) => {
-    const data = JSON.parse(e.data);
+    let data;
+    try {
+      data = JSON.parse(e.data);
+    } catch {
+      return;
+    }
     if (data.type === "status") {
       onStatus(data.status, data.error);
-      if (data.status === "ready" || data.status === "failed") {
-        es.close();
-        onDone();
+      if (TERMINAL_STATUSES.has(data.status)) {
+        finish();
       }
+    } else if (data.type === "error") {
+      finish();
     }
   };
 
-  return () => es.close();
+  return () => {
+    closed = true;
+    es.close();
+  };
 }
 
 export async function syncProgress(data: {
@@ -150,7 +170,7 @@ export async function syncProgress(data: {
   return res.json();
 }
 
-export async function retryEbook(bookId: string): Promise<{ book_id: string; processing_status: string }> {
+export async function retryEbook(bookId: string): Promise<RetryEbookResponse> {
   const res = await authFetch(`/ebooks/${bookId}/retry`, { method: "POST" });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();

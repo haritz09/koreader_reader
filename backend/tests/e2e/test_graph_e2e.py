@@ -133,6 +133,49 @@ def test_graph_grows_when_the_reader_advances(
 
 
 @pytest.mark.e2e
+def test_partial_book_keeps_its_position_filtered_graph_available(
+    e2e_enabled,
+    clean_postgres_database,
+    postgres_connection,
+    e2e_client,
+) -> None:
+    response = e2e_client.post(
+        "/api/v1/ebooks",
+        files={"file": ("book.epub", valid_epub_bytes(), "application/epub+zip")},
+    )
+    assert response.status_code == 202
+    book_id = response.json()["book_id"]
+    document_hash = response.json()["document_hash"]
+
+    assert _wait_for_ready(e2e_client, book_id)["processing_status"] == "ready"
+    postgres_connection.execute(
+        "UPDATE books SET processing_status = 'partial' WHERE id = %s",
+        (book_id,),
+    )
+    postgres_connection.commit()
+    _seed_knowledge(postgres_connection, book_id)
+
+    sync = e2e_client.post(
+        "/api/v1/adapters/koreader/sync",
+        json={
+            "document": document_hash,
+            "progress": 0.5,
+            "percentage": 50,
+            "device": "kobo",
+        },
+    )
+    assert sync.status_code == 202
+
+    graph_response = e2e_client.get(f"/api/v1/ebooks/{book_id}/graph")
+
+    assert graph_response.status_code == 200
+    graph = graph_response.json()
+    assert graph["position"] == 0.5
+    assert [node["label"] for node in graph["nodes"]] == ["Alice"]
+    assert graph["edges"] == []
+
+
+@pytest.mark.e2e
 def test_rewinding_shrinks_the_graph(
     e2e_enabled,
     clean_postgres_database,

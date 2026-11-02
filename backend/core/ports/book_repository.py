@@ -40,6 +40,9 @@ class BookRepository(Protocol):
     async def mark_ready(self, book_id: str) -> None:
         ...
 
+    async def mark_partial(self, book_id: str, error: str) -> None:
+        ...
+
     async def mark_failed(self, book_id: str, error: str) -> None:
         ...
 

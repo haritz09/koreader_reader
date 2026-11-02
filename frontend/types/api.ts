@@ -1,3 +1,5 @@
+import type { ProcessingStatus } from "@/lib/status";
+
 export interface GraphNodeResponse {
   node_id: string;
   label: string;
@@ -30,7 +32,12 @@ export interface GraphResponse {
 export interface EbookUploadResponse {
   book_id: string;
   document_hash: string;
-  processing_status: string;
+  processing_status: ProcessingStatus;
+}
+
+export interface RetryEbookResponse {
+  book_id: string;
+  processing_status: ProcessingStatus;
 }
 
 export interface EbookStatusResponse extends EbookUploadResponse {

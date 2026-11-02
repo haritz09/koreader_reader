@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.entities.graph import BookState
+from core.domain.status import FAILED, PARTIAL, PENDING, PROCESSING, READY
 from db.models.book import Book
 from db.models.chapter import ChapterRecord
 from db.models.chunk import ChunkRecord
@@ -40,7 +41,7 @@ class PostgresBookRepository:
 				id=book_id,
 				document_hash=document_hash,
 				storage_key=storage_key,
-				processing_status="pending",
+				processing_status=PENDING,
 				graph_revision=0,
 			)
 			.on_conflict_do_nothing(index_elements=[Book.document_hash])
@@ -65,7 +66,7 @@ class PostgresBookRepository:
 		book = await self.get_by_id(book_id)
 		if book is None:
 			return
-		book.processing_status = "processing"
+		book.processing_status = PROCESSING
 		book.processing_error = None
 		await self._session.commit()
 
@@ -73,7 +74,7 @@ class PostgresBookRepository:
 		book = await self.get_by_id(book_id)
 		if book is None:
 			return
-		book.processing_status = "pending"
+		book.processing_status = PENDING
 		book.processing_error = None
 		await self._session.commit()
 
@@ -120,15 +121,23 @@ class PostgresBookRepository:
 		book = await self.get_by_id(book_id)
 		if book is None:
 			return
-		book.processing_status = "ready"
+		book.processing_status = READY
 		book.processing_error = None
+		await self._session.commit()
+
+	async def mark_partial(self, book_id: str, error: str) -> None:
+		book = await self.get_by_id(book_id)
+		if book is None:
+			return
+		book.processing_status = PARTIAL
+		book.processing_error = error[:2000]
 		await self._session.commit()
 
 	async def mark_failed(self, book_id: str, error: str) -> None:
 		book = await self.get_by_id(book_id)
 		if book is None:
 			return
-		book.processing_status = "failed"
+		book.processing_status = FAILED
 		book.processing_error = error[:2000]
 		await self._session.commit()
 

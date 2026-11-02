@@ -8,6 +8,7 @@ These instructions apply to the entire repository. Read the relevant skill befor
 - `.agents/skills/fastapi-clean-architecture/SKILL.md`
 - `.agents/skills/rag-anti-spoiler/SKILL.md`
 - `.agents/skills/reading-progress-adapters/SKILL.md`
+- `.agents/skills/ponytail/SKILL.md`
 
 ## Non-negotiable project rules
 
@@ -19,14 +20,20 @@ These instructions apply to the entire repository. Read the relevant skill befor
 - Chat responses must include a typed `sources` array with the exact `chunk_id` values used for the answer.
 - Keep the core domain provider-agnostic. KOReader details belong only in the adapter layer.
 - Progress synchronization must be asynchronous and expensive extraction work must run in a background queue.
+- Define each shared status, set, or literal once in a canonical module; production code imports it. Tests may assert raw values to protect the public contract.
+- Type closed vocabularies explicitly (`Literal`/`StrEnum` in Python, union types in TypeScript), never as bare `str` or `string`.
+- Never commit generated artifacts such as `*.tsbuildinfo`, `.next/`, or tool caches.
 
 ## Change workflow
 
 1. Locate the owning layer before editing.
 2. Reuse existing ports, schemas, repositories, and providers before adding abstractions.
 3. Add or update focused tests for changed behavior, especially spoiler filtering and API contracts.
-4. Run the narrowest relevant test, then `ruff check` from the repository root, then the broader suite when practical.
+4. Run the narrowest relevant test, then `ruff check`, `npx tsc --noEmit`, and `npm run lint`, then the broader suite when practical.
 5. Do not weaken anti-spoiler filtering to make a test or query pass.
+6. Do not write comments when making changes.
+7. Write and audit every change with the `ponytail` skill.
+8. A failing lint, type check, or test blocks completion; never leave it for the next change.
 
 Tests must be behavior-first: derive cases from the feature's public contract and realistic failure modes, not from the current implementation structure. Do not add tests merely to mirror private methods or make coverage numbers increase.
 

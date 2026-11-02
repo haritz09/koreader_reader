@@ -396,9 +396,13 @@ def _daily_quota(response: httpx.Response) -> tuple[bool, float | None]:
         body = response.json()
     except ValueError:
         return daily, retry_after
+    if isinstance(body, list):
+        body = body[0] if len(body) == 1 else None
     if not isinstance(body, dict):
         return daily, retry_after
     error = body.get("error")
+    if isinstance(error, list):
+        error = error[0] if len(error) == 1 else None
     if not isinstance(error, dict):
         return daily, retry_after
 

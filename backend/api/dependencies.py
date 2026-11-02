@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adapters.auth.jwt_tokens import JwtTokenService
+from adapters.events.redis_book_status import RedisBookStatusSubscriber
 from adapters.koreader.progress_provider import KoreaderProgressAdapter
 from adapters.queue.arq_graph_queue import ArqGraphGenerationQueue
 from adapters.queue.arq_queue import ArqEbookProcessingQueue
@@ -23,6 +24,7 @@ from core.application.use_cases.retry_ebook import RetryEbookUseCase
 from core.application.use_cases.sync_progress import SyncProgressUseCase
 from core.config import settings
 from core.ports.book_repository import BookRepository
+from core.ports.book_status_events import BookStatusSubscriber
 from core.ports.ebook_metadata import EbookMetadataReader
 from core.ports.ebook_storage import EbookStorage
 from core.ports.graph_repository import GraphRepository
@@ -114,6 +116,11 @@ def get_token_service() -> TokenService:
 @lru_cache
 def get_rate_limiter() -> RateLimiter:
 	return RedisRateLimiter(settings.redis_url)
+
+
+@lru_cache
+def get_book_status_subscriber() -> BookStatusSubscriber:
+	return RedisBookStatusSubscriber(settings.redis_url)
 
 
 def _caller_ip(request: Request) -> str:

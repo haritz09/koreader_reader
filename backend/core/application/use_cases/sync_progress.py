@@ -8,13 +8,12 @@ from lib.events import publish
 
 from core.domain.entities.library import ReadingState
 from core.domain.errors import BookNotFoundError
+from core.domain.status import GRAPH_STATUSES
 from core.ports.job_queue import GraphGenerationQueue
 from core.ports.library_repository import LibraryRepository
 from core.ports.reading_progress_provider import ReadingProgressProvider
 
 logger = logging.getLogger(__name__)
-
-READY_STATUS = "ready"
 
 
 @dataclass(frozen=True)
@@ -79,16 +78,9 @@ class SyncProgressUseCase:
         position: float,
         state: ReadingState,
     ) -> bool:
-        """Queue graph generation only when the reader moved forward.
-
-        A rewind deliberately queues nothing. The graph read filters by the
-        stored position on every request, so re-reading already yields a smaller
-        graph and the job is only a refresh of entity identity, never a gate on
-        what the reader can see.
-        """
         if self._graph_queue is None:
             return False
-        if state.processing_status != READY_STATUS:
+        if state.processing_status not in GRAPH_STATUSES:
             return False
         if position <= state.progress_position:
             return False

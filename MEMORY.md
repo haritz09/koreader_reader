@@ -13,8 +13,23 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 - The graph is refreshed by reading progress. A sync that advances the stored position makes newly visible knowledge available; a sync with no new data changes nothing.
 - Ports and concrete implementations use distinct names. Concrete adapters name their backend, such as `PostgresBookRepository`; ports stay provider-agnostic.
 - `api/dependencies.py` is the composition root. Providers return ports and build adapters internally, so routers and use cases never name Postgres or an external vendor.
-- Repeated reads on a long-lived session must be refresh-safe. Repositories project fresh dataclasses instead of replaying ORM entities from the identity map; otherwise polling would never observe a worker-committed status.
-- Streaming endpoints must open their own session through `LibraryRepositoryFactory`. FastAPI tears down request-scoped `yield` dependencies before the response body finishes.
+- Repeated reads on a long-lived session must be refresh-safe. Repositories project fresh dataclasses instead of replaying ORM entities from the identity map.
+- Processing status is push-based: the worker publishes each committed transition to Redis `book-status:{book_id}` and `/events` waits for subscription acknowledgement before re-reading the row, so a terminal event cannot be missed. No database polling; heartbeat every 15 seconds; close on `ready`, `failed`, or `partial`.
+- `LibraryRepositoryFactory` gives the status stream a short-lived session for authorization and the current status; the stream itself holds no database session.
+
+## Shared Constants
+
+- Book processing statuses have one definition per runtime: `backend/core/domain/status.py` and `frontend/lib/status.ts`. Use cases, repositories, routes, workers, and components import the shared names; they never repeat status strings or status sets.
+- Status lifecycle: `pending -> processing -> ready | partial | failed`. Only `partial` and `failed` are retryable, and a retry returns the book to `pending`. The status stream closes on `ready`, `partial`, or `failed`. Graph reads and graph generation are allowed on `ready` or `partial` only.
+- Frontend status contract: open the graph on `ready` or `partial`, offer retry on `failed` or `partial`, and keep streaming for `pending` or `processing`.
+- Business rules belong in `AGENTS.md` and `MEMORY.md`, not in code comments. Code comments stay limited to what the code cannot express on its own.
+
+## Quality Gates
+
+- Required local checks: `ruff check backend` from the repository root, `npx tsc --noEmit` and `npm run lint` from `frontend`, plus the focused pytest tier for the change.
+- Tests assert raw status literals on purpose; production code imports the canonical constants. Do not refactor contract tests to import production constants.
+- Generated artifacts stay out of git, including `*.tsbuildinfo`, `.next/`, and tool caches.
+- Dependency security is judged with `npm audit --omit=dev`. Dev-only tooling advisories are not runtime exposure and are upgraded with the framework, not forced separately.
 
 ## Graph And Anti-Spoiler Boundary
 
@@ -24,6 +39,7 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 - Identity resolution deliberately runs over every mention in the book. The result is an id-to-id mapping without text. Never add a position clause to `PostgresKnowledgeRepository.get_entity_candidates`; stored identity must not depend on when the job ran.
 - Emit an edge only when both endpoints resolve to a node visible at the current position. Missing endpoints, ambiguous names, and self-references produce no edge.
 - `books.graph_revision` changes only when stored resolution changes. Rewinding queues no work because the read already filters.
+- Extraction completion queues a first identity resolution pass, so a book opened at position zero still gets merged nodes before any sync.
 - Resolution is deterministic first: casefold, strip accents and punctuation, collapse whitespace, then group by normalized name and entity type. Similar-but-unequal names or conflicting types escalate to `EntityResolver`; resolver failure leaves candidates separate.
 - `entity_type` is a closed vocabulary: `character`, `enemy`, `artifact`, `organization`, `concept`, plus code-only fallback `other`. `location` and `event` are node types, never entity types. The database `CHECK` enforces this.
 - Entity descriptions, subtypes, and aliases are position-derived, never read from a canonical row.
@@ -34,17 +50,18 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 - Use Gemini through its OpenAI-compatible endpoint. `Settings` defaults and `backend/.env.example` use `gemini-2.5-flash`, `gemini-2.5-flash-lite` as fallback, and `https://generativelanguage.googleapis.com/v1beta/openai/`; `LLM_API_KEY` is the only accepted key variable.
 - Free-tier tuning: concurrency 2, 5 requests per minute, batch size 3, 3 attempts, exponential backoff capped at 20 seconds, and a 3600-second job timeout.
 - `OpenAIProvider` classifies failures at the HTTP boundary. 401/403/404/422 abort the book; 408/429/5xx, timeouts, transport errors, and malformed responses are transient; other 4xx fail only that chunk. Honor `Retry-After`.
+- Gemini's OpenAI-compatible error body can be a one-element array; unwrap it before reading `QuotaFailure`, `RetryInfo`, or `error.code`.
 - A 429 becomes `LLMQuotaExhaustedError` only with a per-day quota signal (`PerDay`, daily quota id or message, `insufficient_quota`, or a retry delay over 300 seconds). A per-minute 429 stays transient and does not switch models.
 - The provider must return a map keyed by every exact input `chunk_id`, once each, with no unknown ids. This validation prevents a later chunk's knowledge from being stored at an earlier position.
 - Only LLM calls run concurrently. Persist sequentially through one `AsyncSession`; SQLAlchemy sessions are not concurrency-safe.
-- A configuration or daily-quota failure must never leave a partially extracted book `ready`. Zero successful chunks mark the book `failed`; partial success may be `ready`; quota/configuration errors cancel pending work and mark `failed`.
+- A book is `ready` only when every chunk was extracted. Zero successful chunks mark it `failed`; partial success marks it `partial`, keeps the EPUB for manual retry, and exposes only the position-filtered graph. A daily-quota failure after successful chunks returns a partial summary; with zero successes it marks `failed`.
 - `FailoverLLMProvider` switches only after daily-quota exhaustion, remembers exhausted models until the retry delay or next midnight Pacific Time, and raises when every model is exhausted.
-- The worker marks the book `failed` without an ARQ retry on `LLMConfigurationError` or `LLMQuotaExhaustedError`. Transient failures still use the normal `max_tries=3` retry.
+- The worker marks the book `failed` without an ARQ retry on configuration or quota errors before any successful chunk. Partial results are terminal for the current attempt, preserve the EPUB, close the status stream, and can be manually retried; transient failures with no successful chunks still use `max_tries=3`.
 - The rate limiter is per worker process and enforces only requests per minute. Multiple workers multiply the rate; daily quotas are handled only by model fallback.
 - Real extraction without a valid key marks the book `failed`, not `ready` with empty knowledge.
 - CI e2e must not call a real LLM. `docker-compose.e2e.yml` selects `MockLLMProvider` with `LLM_PROVIDER=mock` and `ALLOW_MOCK_LLM=true`; the worker refuses mock mode unless both are set. The mock returns empty results for every requested chunk and no resolution groups.
 - The base worker `env_file` is optional so a CI checkout without the gitignored `backend/.env` can start. The normal Compose path still loads it when present.
-- Extraction summaries are logged only; they are not stored on the book.
+- Extraction counts are logged; an incomplete reason is stored as the book's processing error.
 
 ## Reading Position
 

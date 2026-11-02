@@ -2,10 +2,9 @@
 
 from core.domain.entities.graph import BookGraph
 from core.domain.errors import BookNotFoundError, BookNotReadyError
+from core.domain.status import GRAPH_STATUSES
 from core.ports.library_repository import LibraryRepository
 from core.services.graph_assembly import GraphAssemblyService
-
-READY_STATUS = "ready"
 
 
 class GetBookGraphUseCase:
@@ -23,6 +22,6 @@ class GetBookGraphUseCase:
         state = await self._library.get_reading_state(owner_id, book_id)
         if state is None:
             raise BookNotFoundError(book_id)
-        if state.processing_status != READY_STATUS:
+        if state.processing_status not in GRAPH_STATUSES:
             raise BookNotReadyError(state.processing_status)
         return await self._assembly.build(book_id, state.progress_position)

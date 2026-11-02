@@ -3,6 +3,7 @@
 from sqlalchemy import Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from core.domain.status import PENDING
 from db.base import Base
 
 
@@ -18,7 +19,7 @@ class Book(Base):
 	author: Mapped[str | None] = mapped_column(String(512))
 	cover_path: Mapped[str | None] = mapped_column(String(512))
 	processing_status: Mapped[str] = mapped_column(
-		String(32), nullable=False, default="pending"
+		String(32), nullable=False, default=PENDING
 	)
 	processing_error: Mapped[str | None] = mapped_column(String(2000))
 	graph_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

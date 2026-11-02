@@ -252,6 +252,42 @@ def test_a_per_day_quota_failure_is_not_treated_as_a_rate_limit() -> None:
     assert error.value.retry_after == 3600.0
 
 
+def test_a_list_wrapped_per_day_quota_failure_is_detected() -> None:
+    response = httpx.Response(
+        429,
+        json=[
+            {
+                "error": {
+                    "code": 429,
+                    "message": "Quota exceeded.",
+                    "details": [
+                        {
+                            "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                            "violations": [
+                                {
+                                    "quotaId": (
+                                        "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+                                    )
+                                }
+                            ],
+                        },
+                        {
+                            "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                            "retryDelay": "3600s",
+                        },
+                    ],
+                }
+            }
+        ],
+        request=httpx.Request("POST", "https://example.test"),
+    )
+
+    with pytest.raises(LLMQuotaExhaustedError) as error:
+        OpenAIProvider._raise_for_status(response)
+
+    assert error.value.retry_after == 3600.0
+
+
 def test_a_per_minute_quota_failure_stays_transient() -> None:
     response = httpx.Response(
         429,

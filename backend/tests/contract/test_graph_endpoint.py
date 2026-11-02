@@ -154,6 +154,20 @@ def test_graph_endpoint_returns_an_empty_graph_before_any_reading() -> None:
     assert body["edges"] == []
 
 
+def test_graph_endpoint_exposes_only_position_visible_data_for_partial_extraction() -> None:
+    response = fetch(
+        StubLibraryRepository(
+            progress_position=0.5,
+            processing_status="partial",
+        )
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [node["label"] for node in body["nodes"]] == ["Alice", "Bob"]
+    assert [edge["edge_id"] for edge in body["edges"]] == ["f1"]
+
+
 def test_graph_endpoint_ignores_a_client_supplied_position() -> None:
     response = fetch(StubLibraryRepository(progress_position=0.5), "/api/v1/ebooks/book-123/graph?position=1.0")
 

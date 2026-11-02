@@ -237,7 +237,7 @@ def test_extract_from_chunks_does_not_retry_configuration_errors() -> None:
     asyncio.run(_run())
 
 
-def test_extract_from_chunks_aborts_on_daily_quota_after_a_successful_batch() -> None:
+def test_extract_from_chunks_returns_partial_when_quota_runs_out_after_success() -> None:
     async def _run() -> None:
         class QuotaLLM:
             def __init__(self) -> None:
@@ -259,11 +259,14 @@ def test_extract_from_chunks_aborts_on_daily_quota_after_a_successful_batch() ->
         service = _service(llm, repo, concurrency=1, batch_size=3)
         chunks = [(f"c{index}", _make_chunk(index)) for index in range(4)]
 
-        with pytest.raises(LLMQuotaExhaustedError):
-            await service.extract_from_chunks("book-1", chunks)
+        summary = await service.extract_from_chunks("book-1", chunks)
 
         assert llm.call_count == 2
         assert len(repo.inserted) == 3
+        assert summary.total == 4
+        assert summary.succeeded == 3
+        assert summary.failed == 1
+        assert "daily quota exhausted" in summary.error
 
     asyncio.run(_run())
 

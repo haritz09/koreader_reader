@@ -1,17 +1,16 @@
-"""The processing-status stream the library grid subscribes to.
-
-The stream outlives the request scope, so it opens its own repository through
-``LibraryRepositoryFactory``; these tests drive that port with a fake so the
-poll loop is exercised without a real database or worker.
-"""
+"""The processing-status stream the library grid subscribes to."""
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi.testclient import TestClient
 
-from api.dependencies import get_library_repository_factory
+from api.dependencies import (
+    get_book_status_subscriber,
+    get_library_repository_factory,
+)
+from core.ports.book_status_events import BookStatusEvent
 from main import app
 
 
@@ -22,10 +21,7 @@ class StatusBook:
 
 
 class ScriptedLibrary:
-    """Reports the scripted statuses in order, then repeats the last one.
-
-    ``None`` stands for a book that is not in the caller's library.
-    """
+    """Reports the scripted statuses in order, then repeats the last one."""
 
     def __init__(self, statuses: list[str | None]) -> None:
         self._statuses = statuses
@@ -39,25 +35,37 @@ class ScriptedLibrary:
         return StatusBook(status)
 
 
-class FailingLibrary:
-    """Reaches ``failed`` on the second read, with a reason to report."""
+class ScriptedSubscription:
+    def __init__(self, events: list[BookStatusEvent]) -> None:
+        self._events = list(events)
+        self.closed = False
 
-    def __init__(self) -> None:
-        self.reads = 0
+    async def get(self, timeout: float) -> BookStatusEvent:
+        if not self._events:
+            raise AssertionError("status stream waited for an unscripted event")
+        return self._events.pop(0)
 
-    async def get_book(self, owner_id: str, book_id: str) -> StatusBook | None:
-        self.reads += 1
-        if self.reads == 1:
-            return StatusBook("processing")
-        return StatusBook("failed", error="extraction failed")
+    async def aclose(self) -> None:
+        self.closed = True
 
 
-def _use(library) -> None:
+class ScriptedSubscriber:
+    def __init__(self, events: list[BookStatusEvent]) -> None:
+        self._events = events
+        self.subscription: ScriptedSubscription | None = None
+
+    async def subscribe(self, book_id: str) -> ScriptedSubscription:
+        self.subscription = ScriptedSubscription(self._events)
+        return self.subscription
+
+
+def _use(library, subscriber: ScriptedSubscriber) -> None:
     @asynccontextmanager
-    async def open_library() -> AsyncIterator[object]:
+    async def open_library() -> AsyncGenerator[object, None]:
         yield library
 
     app.dependency_overrides[get_library_repository_factory] = lambda: open_library
+    app.dependency_overrides[get_book_status_subscriber] = lambda: subscriber
 
 
 def _events(client: TestClient, book_id: str = "book-1") -> list[dict]:
@@ -71,56 +79,74 @@ def _events(client: TestClient, book_id: str = "book-1") -> list[dict]:
         ]
 
 
-def test_the_stream_reports_every_status_change_until_the_book_settles(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr("api.routes.ebooks.STATUS_POLL_SECONDS", 0.01)
-    _use(ScriptedLibrary(["pending", "processing", "ready"]))
+def test_the_stream_reports_the_current_status_and_then_the_terminal_update() -> None:
+    library = ScriptedLibrary(["pending", "processing"])
+    subscriber = ScriptedSubscriber([BookStatusEvent("ready")])
+    _use(library, subscriber)
 
     try:
         with TestClient(app) as client:
             events = _events(client)
     finally:
         app.dependency_overrides.pop(get_library_repository_factory, None)
+        app.dependency_overrides.pop(get_book_status_subscriber, None)
 
-    assert [event["type"] for event in events] == ["status", "status", "status"]
-    assert [event["status"] for event in events] == ["pending", "processing", "ready"]
-
-
-def test_the_stream_reports_the_failure_reason_when_processing_fails(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr("api.routes.ebooks.STATUS_POLL_SECONDS", 0.01)
-    _use(FailingLibrary())
-
-    try:
-        with TestClient(app) as client:
-            events = _events(client)
-    finally:
-        app.dependency_overrides.pop(get_library_repository_factory, None)
-
-    assert events[-1] == {
-        "type": "status",
-        "status": "failed",
-        "error": "extraction failed",
-    }
+    assert [event["type"] for event in events] == ["status", "status"]
+    assert [event["status"] for event in events] == ["processing", "ready"]
+    assert library.reads == 2
+    assert subscriber.subscription is not None
+    assert subscriber.subscription.closed
 
 
-def test_the_stream_reports_an_error_and_closes_when_the_book_is_gone(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr("api.routes.ebooks.STATUS_POLL_SECONDS", 0.01)
-    library = ScriptedLibrary(["processing", None])
-    _use(library)
+def test_the_stream_reports_the_failure_reason_when_processing_fails() -> None:
+    library = ScriptedLibrary(["processing", "processing"])
+    subscriber = ScriptedSubscriber(
+        [BookStatusEvent("failed", error="extraction failed")]
+    )
+    _use(library, subscriber)
 
     try:
         with TestClient(app) as client:
             events = _events(client)
     finally:
         app.dependency_overrides.pop(get_library_repository_factory, None)
+        app.dependency_overrides.pop(get_book_status_subscriber, None)
 
     assert events == [
         {"type": "status", "status": "processing", "error": None},
-        {"type": "error", "message": "Book not found"},
+        {"type": "status", "status": "failed", "error": "extraction failed"},
     ]
+
+
+def test_the_stream_reports_partial_as_a_terminal_status() -> None:
+    library = ScriptedLibrary(["partial"])
+    subscriber = ScriptedSubscriber([])
+    _use(library, subscriber)
+
+    try:
+        with TestClient(app) as client:
+            events = _events(client)
+    finally:
+        app.dependency_overrides.pop(get_library_repository_factory, None)
+        app.dependency_overrides.pop(get_book_status_subscriber, None)
+
+    assert events == [{"type": "status", "status": "partial", "error": None}]
+    assert subscriber.subscription is None
+
+
+def test_the_stream_reports_an_error_and_closes_when_the_book_is_gone() -> None:
+    library = ScriptedLibrary(["processing", None])
+    subscriber = ScriptedSubscriber([])
+    _use(library, subscriber)
+
+    try:
+        with TestClient(app) as client:
+            events = _events(client)
+    finally:
+        app.dependency_overrides.pop(get_library_repository_factory, None)
+        app.dependency_overrides.pop(get_book_status_subscriber, None)
+
+    assert events == [{"type": "error", "message": "Book not found"}]
     assert library.reads == 2
+    assert subscriber.subscription is not None
+    assert subscriber.subscription.closed

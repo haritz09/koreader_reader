@@ -21,6 +21,7 @@ def _status_events(response):
 def test_the_status_stream_reports_the_status_the_book_reached(
     e2e_enabled,
     clean_postgres_database,
+    postgres_connection,
     e2e_client,
 ) -> None:
     upload = e2e_client.post(
@@ -40,3 +41,23 @@ def test_the_status_stream_reports_the_status_the_book_reached(
     reported = e2e_client.get(f"/api/v1/ebooks/{book_id}").json()["processing_status"]
     assert events[-1]["status"] in {"ready", "failed"}
     assert events[-1]["status"] == reported
+
+    postgres_connection.execute(
+        "UPDATE books SET processing_status = 'partial', processing_error = %s "
+        "WHERE id = %s",
+        ("Some chunks could not be extracted", book_id),
+    )
+    postgres_connection.commit()
+
+    with e2e_client.stream("GET", f"/api/v1/ebooks/{book_id}/events") as response:
+        partial_events = [
+            event for event in _status_events(response) if event["type"] == "status"
+        ]
+
+    assert partial_events == [
+        {
+            "type": "status",
+            "status": "partial",
+            "error": "Some chunks could not be extracted",
+        }
+    ]

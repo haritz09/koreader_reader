@@ -1,9 +1,8 @@
 """Use case for removing a book from one owner's library."""
 
 from core.domain.errors import BookNotFoundError, BookProcessingError
+from core.domain.status import PROCESSING
 from core.ports.library_repository import LibraryRepository
-
-PROCESSING_STATUS = "processing"
 
 
 class DeleteEbookUseCase:
@@ -21,6 +20,6 @@ class DeleteEbookUseCase:
         book = await self._library.get_book(owner_id, book_id)
         if book is None:
             raise BookNotFoundError(book_id)
-        if book.processing_status == PROCESSING_STATUS:
+        if book.processing_status == PROCESSING:
             raise BookProcessingError(book_id)
         await self._library.soft_delete(owner_id, book_id)

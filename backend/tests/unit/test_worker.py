@@ -6,6 +6,7 @@ import pytest
 import workers.worker as worker_module
 from core.config import settings
 from core.ports.llm_provider import LLMConfigurationError, LLMQuotaExhaustedError
+from core.services.knowledge_extraction import ExtractionSummary
 
 
 class FakeSessionContext:
@@ -35,6 +36,9 @@ class FakeRepository:
 	async def mark_failed(self, book_id: str, error: str) -> None:
 		self.calls.append(("failed", error))
 
+	async def mark_partial(self, book_id: str, error: str) -> None:
+		self.calls.append(("partial", book_id))
+
 	async def get_chunk_ids_by_book(self, book_id: str) -> list[tuple[str, int]]:
 		return []
 
@@ -58,8 +62,11 @@ def make_ctx(
 			return None
 
 	class FakeStorage:
+		def __init__(self) -> None:
+			self.deleted: list[str] = []
+
 		async def delete(self, storage_key):
-			pass
+			self.deleted.append(storage_key)
 
 	class FakeLLM:
 		async def extract_knowledge(self, chunk_text):
@@ -72,10 +79,12 @@ def make_ctx(
 				for chunk_id, text in chunks
 			}
 
+	storage = FakeStorage()
 	return {
 		"parser": FakeParser(),
-		"storage": FakeStorage(),
+		"storage": storage,
 		"llm_provider": FakeLLM(),
+		"_storage": storage,
 		"_repository": repository,
 	}
 
@@ -174,6 +183,31 @@ def test_worker_marks_quota_exhaustion_failed_without_retry(monkeypatch) -> None
 		("replace", "book-123"),
 		("failed", "All configured models exhausted"),
 	]
+
+
+def test_worker_marks_incomplete_extraction_partial_and_keeps_source(monkeypatch) -> None:
+	repository = FakeRepository()
+	configure_worker(monkeypatch, repository)
+	monkeypatch.setattr(worker_module, "chunk_chapters", lambda chapters: [])
+
+	class PartialExtraction:
+		def __init__(self, *args, **kwargs) -> None:
+			pass
+
+		async def extract_from_chunks(self, book_id, chunks) -> ExtractionSummary:
+			return ExtractionSummary(2, 1, 1, 0, 0, 0, 0)
+
+	monkeypatch.setattr(worker_module, "KnowledgeExtractionService", PartialExtraction)
+	ctx = make_ctx(repository)
+
+	asyncio.run(worker_module.process_ebook(ctx, "book-123", "books/book-123.epub"))
+
+	assert repository.calls == [
+		("processing", "book-123"),
+		("replace", "book-123"),
+		("partial", "book-123"),
+	]
+	assert ctx["_storage"].deleted == []
 
 
 def test_worker_uses_the_configured_extraction_timeout() -> None:
