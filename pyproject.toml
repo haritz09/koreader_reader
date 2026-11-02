@@ -26,6 +26,7 @@ known-first-party = [
     "core",
     "db",
     "main",
+    "rag",
     "tests",
     "workers",
 ]

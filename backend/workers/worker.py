@@ -23,6 +23,17 @@ from core.services.knowledge_extraction import KnowledgeExtractionService
 from db.repositories.knowledge_repository import PostgresKnowledgeRepository
 from db.repositories.postgres_book_repository import PostgresBookRepository
 from db.session import session_factory
+from rag.adapters.embeddings.gemini import GeminiEmbeddingProvider
+from rag.adapters.embeddings.mock import MockEmbeddingProvider
+from rag.adapters.persistence.repository import PostgresRagRepository
+from rag.adapters.queue.arq_rag_queue import ArqRagIndexQueue
+from rag.application.build_index import BuildRagIndexUseCase
+from rag.application.embeddings import EmbedKnowledgeService
+from rag.clustering.leiden import LeidenCommunityDetector
+from rag.clustering.service import CommunityBuilder
+from rag.domain.clustering import ClusterParameters
+from rag.domain.embeddings import EMBEDDING_DIMENSIONS
+from rag.ports.embedding_provider import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +59,62 @@ def _build_llm_provider() -> FailoverLLMProvider | MockLLMProvider:
 	)
 
 
+def _build_embedding_provider() -> EmbeddingProvider:
+	if settings.embedding_dimensions != EMBEDDING_DIMENSIONS:
+		raise RuntimeError(
+			f"EMBEDDING_DIMENSIONS must be {EMBEDDING_DIMENSIONS}"
+		)
+	if settings.embedding_provider == "mock":
+		if not settings.allow_mock_embeddings:
+			raise RuntimeError(
+				"EMBEDDING_PROVIDER=mock requires ALLOW_MOCK_EMBEDDINGS=true"
+			)
+		logger.warning("Mock embedding provider enabled; vectors are deterministic")
+		return MockEmbeddingProvider()
+	return GeminiEmbeddingProvider()
+
+
+def _cluster_parameters() -> ClusterParameters:
+	return ClusterParameters(
+		resolution=settings.community_resolution,
+		max_levels=settings.community_max_levels,
+		min_size=settings.community_min_size,
+		seed=settings.community_seed,
+		objective="modularity",
+		fact_edge_weight=settings.community_fact_edge_weight,
+		cooccurrence_edge_weight=settings.community_cooccurrence_edge_weight,
+	)
+
+
+def _build_extraction_service(
+	llm_provider: FailoverLLMProvider | MockLLMProvider,
+	knowledge_repository: PostgresKnowledgeRepository,
+) -> KnowledgeExtractionService:
+	return KnowledgeExtractionService(
+		llm_provider,
+		knowledge_repository,
+		concurrency=settings.extraction_concurrency,
+		max_attempts=settings.extraction_max_attempts,
+		retry_base_seconds=settings.extraction_retry_base_seconds,
+		retry_max_seconds=settings.extraction_retry_max_seconds,
+		requests_per_minute=settings.extraction_requests_per_minute,
+		batch_size=settings.extraction_batch_size,
+	)
+
+
 async def startup(ctx: dict) -> None:
 	ctx["parser"] = EpubParser()
 	ctx["storage"] = LocalEbookStorage(Path(settings.ebook_storage_path))
 	ctx["llm_provider"] = _build_llm_provider()
+	ctx["embedding_provider"] = _build_embedding_provider()
 	ctx["status_publisher"] = RedisBookStatusPublisher(settings.redis_url)
+	ctx["session_factory"] = session_factory
+	ctx["book_repository_factory"] = PostgresBookRepository
+	ctx["knowledge_repository_factory"] = PostgresKnowledgeRepository
+	ctx["rag_repository_factory"] = PostgresRagRepository
+	ctx["extraction_service_factory"] = _build_extraction_service
+	ctx["graph_queue"] = ArqGraphGenerationQueue(settings.redis_url)
+	ctx["rag_queue"] = ArqRagIndexQueue(settings.redis_url)
 
 
 async def shutdown(ctx: dict) -> None:
@@ -82,9 +144,9 @@ async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 	publisher: BookStatusPublisher | None = ctx.get("status_publisher")
 	storage_path = str(Path(settings.ebook_storage_path) / storage_key)
 
-	async with session_factory() as session:
-		repository = PostgresBookRepository(session)
-		knowledge_repo = PostgresKnowledgeRepository(session)
+	async with ctx["session_factory"]() as session:
+		repository = ctx["book_repository_factory"](session)
+		knowledge_repo = ctx["knowledge_repository_factory"](session)
 		await repository.mark_processing(book_id)
 		await _publish_status(publisher, book_id, PROCESSING)
 		try:
@@ -101,21 +163,15 @@ async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 
 		chunks = chunk_chapters(chapters)
 		try:
+			await ctx["rag_repository_factory"](session).delete_by_book(book_id)
 			await repository.replace_derived_content(book_id, chapters, chunks)
 			chunk_ids = await repository.get_chunk_ids_by_book(book_id)
 			chunk_id_map = {idx: cid for cid, idx in chunk_ids}
 			chunks_with_ids = [
 				(chunk_id_map[c.chunk_index], c) for c in chunks
 			]
-			extraction = KnowledgeExtractionService(
-				llm_provider,
-				knowledge_repo,
-				concurrency=settings.extraction_concurrency,
-				max_attempts=settings.extraction_max_attempts,
-				retry_base_seconds=settings.extraction_retry_base_seconds,
-				retry_max_seconds=settings.extraction_retry_max_seconds,
-				requests_per_minute=settings.extraction_requests_per_minute,
-				batch_size=settings.extraction_batch_size,
+			extraction = ctx["extraction_service_factory"](
+				llm_provider, knowledge_repo
 			)
 			summary = await extraction.extract_from_chunks(book_id, chunks_with_ids)
 			logger.info("Book %s extraction summary: %s", book_id, summary)
@@ -140,12 +196,12 @@ async def process_ebook(ctx: dict, book_id: str, storage_key: str) -> None:
 				return
 			raise
 
-	await _enqueue_graph_generation(book_id)
+	await _enqueue_graph_generation(ctx, book_id)
 
 
-async def _enqueue_graph_generation(book_id: str) -> None:
+async def _enqueue_graph_generation(ctx: dict, book_id: str) -> None:
 	try:
-		await ArqGraphGenerationQueue(settings.redis_url).enqueue(book_id)
+		await ctx["graph_queue"].enqueue(book_id)
 	except Exception:
 		logger.exception("Could not queue initial graph generation for book %s", book_id)
 
@@ -154,9 +210,9 @@ async def generate_graph(ctx: dict, book_id: str) -> None:
 	"""Refresh entity identity for a book so graph nodes merge across chunks."""
 	llm_provider: FailoverLLMProvider | MockLLMProvider = ctx["llm_provider"]
 
-	async with session_factory() as session:
-		book_repository = PostgresBookRepository(session)
-		knowledge_repository = PostgresKnowledgeRepository(session)
+	async with ctx["session_factory"]() as session:
+		book_repository = ctx["book_repository_factory"](session)
+		knowledge_repository = ctx["knowledge_repository_factory"](session)
 
 		state = await book_repository.get_state(book_id)
 		if state is None:
@@ -178,24 +234,76 @@ async def generate_graph(ctx: dict, book_id: str) -> None:
 			logger.exception("Entity resolution failed for book %s", book_id)
 			return
 
-		if not resolution.canonical_by_entity:
+		if resolution.canonical_by_entity:
+			if resolution.changed:
+				await knowledge_repository.apply_resolution(
+					book_id,
+					resolution.canonical_by_entity,
+					resolution.method_by_entity,
+				)
+				revision = await book_repository.bump_graph_revision(book_id)
+				logger.info(
+					"Book %s graph resolution applied at revision %s",
+					book_id,
+					revision,
+				)
+			else:
+				logger.info("Entity resolution unchanged for book %s", book_id)
+		else:
 			logger.info("No entity mentions to resolve for book %s", book_id)
-			return
-		if not resolution.changed:
-			logger.info("Entity resolution unchanged for book %s", book_id)
+
+		await _enqueue_rag_build_if_needed(ctx, book_id)
+
+
+async def _enqueue_rag_build_if_needed(ctx: dict, book_id: str) -> None:
+	try:
+		async with ctx["session_factory"]() as session:
+			repository = ctx["rag_repository_factory"](session)
+			graph_revision = await repository.get_graph_revision(book_id)
+			if not await repository.needs_build(
+				book_id, graph_revision, settings.embedding_model
+			):
+				return
+		await ctx["rag_queue"].enqueue(
+			book_id, graph_revision, settings.embedding_model
+		)
+	except Exception:
+		logger.exception("Could not queue RAG index build for book %s", book_id)
+
+
+async def build_rag_index(ctx: dict, book_id: str) -> None:
+	provider: EmbeddingProvider = ctx["embedding_provider"]
+
+	async with ctx["session_factory"]() as session:
+		repository = ctx["rag_repository_factory"](session)
+		graph_revision = await repository.get_graph_revision(book_id)
+		if not await repository.needs_build(book_id, graph_revision, provider.model):
+			logger.info("RAG index for book %s is already current", book_id)
 			return
 
-		await knowledge_repository.apply_resolution(
-			book_id,
-			resolution.canonical_by_entity,
-			resolution.method_by_entity,
+		use_case = BuildRagIndexUseCase(
+			repository,
+			EmbedKnowledgeService(
+				provider,
+				repository,
+				dimensions=settings.embedding_dimensions,
+				batch_size=settings.embedding_batch_size,
+				max_attempts=settings.embedding_max_attempts,
+				retry_base_seconds=settings.embedding_retry_base_seconds,
+				retry_max_seconds=settings.embedding_retry_max_seconds,
+			),
+			CommunityBuilder(
+				repository,
+				LeidenCommunityDetector(),
+				_cluster_parameters(),
+			),
+			provider.model,
 		)
-		revision = await book_repository.bump_graph_revision(book_id)
-		logger.info("Book %s graph resolution applied at revision %s", book_id, revision)
+		await use_case.execute(book_id, graph_revision)
 
 
 class WorkerSettings:
-	functions: ClassVar[list] = [process_ebook, generate_graph]
+	functions: ClassVar[list] = [process_ebook, generate_graph, build_rag_index]
 	on_startup = startup
 	on_shutdown = shutdown
 	max_tries = 3
