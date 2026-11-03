@@ -22,6 +22,9 @@ from rag.domain.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_SOURCE_TYPE_VA
 from rag.domain.status import RAG_INDEX_STATUS_VALUES
 
 READING_POSITION_CHECK = "reading_position >= 0.0 AND reading_position <= 1.0"
+FIRST_SEEN_POSITION_CHECK = (
+    "first_seen_position >= 0.0 AND first_seen_position <= 1.0"
+)
 EMBEDDING_SOURCE_TYPE_CHECK = f"source_type IN ({EMBEDDING_SOURCE_TYPE_VALUES})"
 RAG_INDEX_STATUS_CHECK = f"status IN ({RAG_INDEX_STATUS_VALUES})"
 
@@ -79,7 +82,10 @@ class RagCommunityRecord(Base):
     __table_args__ = (
         Index("ix_rag_communities_run_level", "run_id", "level"),
         Index("ix_rag_communities_book_level", "book_id", "level"),
-        CheckConstraint(READING_POSITION_CHECK, name="ck_rag_communities_reading_position"),
+        CheckConstraint(
+            FIRST_SEEN_POSITION_CHECK,
+            name="ck_rag_communities_first_seen_position",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)

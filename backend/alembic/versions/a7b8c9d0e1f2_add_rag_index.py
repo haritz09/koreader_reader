@@ -19,6 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 _READING_POSITION = 'reading_position >= 0.0 AND reading_position <= 1.0'
+_FIRST_SEEN_POSITION = 'first_seen_position >= 0.0 AND first_seen_position <= 1.0'
 _SOURCE_TYPE_VALUES = "'chunk', 'entity', 'fact', 'event', 'location'"
 _STATUS_VALUES = "'pending', 'building', 'ready', 'partial', 'failed'"
 
@@ -90,7 +91,10 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['book_id'], ['books.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['parent_id'], ['rag_communities.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
-        sa.CheckConstraint(_READING_POSITION, name='ck_rag_communities_reading_position'),
+        sa.CheckConstraint(
+            _FIRST_SEEN_POSITION,
+            name='ck_rag_communities_first_seen_position',
+        ),
     )
     op.create_index('ix_rag_communities_run_level', 'rag_communities', ['run_id', 'level'])
     op.create_index('ix_rag_communities_book_level', 'rag_communities', ['book_id', 'level'])
