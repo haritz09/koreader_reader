@@ -3,5 +3,3 @@ services:
     environment:
       LLM_PROVIDER: mock
       ALLOW_MOCK_LLM: "true"
-      EMBEDDING_PROVIDER: mock
-      ALLOW_MOCK_EMBEDDINGS: "true"

@@ -8,8 +8,6 @@ greenlet==3.1.1
 psycopg[binary]==3.2.3
 alembic==1.14.0
 pgvector==0.3.6
-leidenalg==0.10.2
-igraph==0.11.9
 arq==0.26.3
 httpx==0.28.1
 tzdata==2026.5

@@ -22,25 +22,6 @@ class Settings(BaseSettings):
     extraction_requests_per_minute: int = 5
     extraction_batch_size: int = 3
     extraction_job_timeout_seconds: int = 3600
-    embedding_provider: Literal["gemini", "mock"] = "gemini"
-    embedding_api_key: str = ""
-    embedding_model: str = "gemini-embedding-001"
-    embedding_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
-    embedding_dimensions: int = 768
-    embedding_batch_size: int = 100
-    embedding_max_attempts: int = 3
-    embedding_retry_base_seconds: float = 1.0
-    embedding_retry_max_seconds: float = 20.0
-    embedding_quota_defer_seconds: int = 21600
-    allow_mock_embeddings: bool = False
-    rag_build_stale_seconds: int = 7200
-    community_resolution: float = 1.0
-    community_max_levels: int = 3
-    community_min_size: int = 4
-    community_min_members: int = 2
-    community_seed: int = 42
-    community_fact_edge_weight: float = 2.0
-    community_cooccurrence_edge_weight: float = 1.0
 
     jwt_secret: str = "dev-insecure-secret-change-me-use-a-real-one"
     jwt_algorithm: str = "HS256"

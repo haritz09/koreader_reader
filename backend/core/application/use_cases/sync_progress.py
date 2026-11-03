@@ -4,13 +4,14 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from lib.events import publish
+
 from core.domain.entities.library import ReadingState
 from core.domain.errors import BookNotFoundError
 from core.domain.status import GRAPH_STATUSES
 from core.ports.job_queue import GraphGenerationQueue
 from core.ports.library_repository import LibraryRepository
 from core.ports.reading_progress_provider import ReadingProgressProvider
-from lib.events import publish
 
 logger = logging.getLogger(__name__)
 
