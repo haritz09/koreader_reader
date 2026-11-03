@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import math
+from collections.abc import Mapping
 
 from rag.domain.embeddings import EmbeddingSource, EmbeddingSummary
 from rag.domain.errors import (
@@ -15,6 +16,25 @@ from rag.ports.rag_repository import RagRepository
 
 def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _select_pending(
+    sources: list[EmbeddingSource],
+    existing: Mapping[tuple[str, str], str],
+) -> tuple[list[tuple[EmbeddingSource, str]], int, int]:
+    pending: list[tuple[EmbeddingSource, str]] = []
+    reused = 0
+    skipped = 0
+    for source in sources:
+        digest = content_hash(source.text)
+        if existing.get((source.source_type.value, source.source_id)) == digest:
+            reused += 1
+            continue
+        if not source.text.strip():
+            skipped += 1
+            continue
+        pending.append((source, digest))
+    return pending, reused, skipped
 
 
 class EmbedKnowledgeService:
@@ -37,7 +57,7 @@ class EmbedKnowledgeService:
         self._provider = provider
         self._repository = repository
         self._dimensions = dimensions
-        self._batch_size = max(1, batch_size)
+        self._batch_size = max(1, min(batch_size, provider.max_batch_size))
         self._max_attempts = max(1, max_attempts)
         self._retry_base_seconds = max(0.0, retry_base_seconds)
         self._retry_max_seconds = max(0.0, retry_max_seconds)
@@ -48,31 +68,36 @@ class EmbedKnowledgeService:
             book_id, self._provider.model
         )
 
-        pending: list[tuple[EmbeddingSource, str]] = []
-        reused = 0
-        for source in sources:
-            digest = content_hash(source.text)
-            if existing.get((source.source_type.value, source.source_id)) == digest:
-                reused += 1
-                continue
-            pending.append((source, digest))
+        pending, reused, skipped = _select_pending(sources, existing)
+        vectors = await self._embed_unique(pending)
+        await self._repository.upsert_embeddings(
+            book_id,
+            self._provider.model,
+            [(source, digest, vectors[digest]) for source, digest in pending],
+        )
 
-        embedded = 0
-        for start in range(0, len(pending), self._batch_size):
-            batch = pending[start : start + self._batch_size]
-            vectors = await self._embed_batch([source.text for source, _ in batch])
-            await self._repository.upsert_embeddings(
-                book_id,
-                self._provider.model,
-                self._dimensions,
-                [
-                    (source, digest, vector)
-                    for (source, digest), vector in zip(batch, vectors, strict=True)
-                ],
-            )
-            embedded += len(batch)
+        return EmbeddingSummary(
+            total=len(sources),
+            embedded=len(pending),
+            reused=reused,
+            skipped=skipped,
+        )
 
-        return EmbeddingSummary(total=len(sources), embedded=embedded, reused=reused)
+    async def _embed_unique(
+        self,
+        pending: list[tuple[EmbeddingSource, str]],
+    ) -> dict[str, list[float]]:
+        unique_texts: dict[str, str] = {}
+        for source, digest in pending:
+            unique_texts.setdefault(digest, source.text)
+
+        digests = list(unique_texts)
+        vectors: dict[str, list[float]] = {}
+        for start in range(0, len(digests), self._batch_size):
+            batch = digests[start : start + self._batch_size]
+            batch_vectors = await self._embed_batch([unique_texts[key] for key in batch])
+            vectors.update(zip(batch, batch_vectors, strict=True))
+        return vectors
 
     async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts:

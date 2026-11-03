@@ -9,4 +9,6 @@ class RagIndexQueue(Protocol):
         book_id: str,
         graph_revision: int,
         embedding_model: str,
+        *,
+        defer_by_seconds: float | None = None,
     ) -> None: ...

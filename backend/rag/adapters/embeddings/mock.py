@@ -20,6 +20,10 @@ class MockEmbeddingProvider:
     def dimensions(self) -> int:
         return self._dimensions
 
+    @property
+    def max_batch_size(self) -> int:
+        return 100
+
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         return [self._vector(text) for text in texts]
 

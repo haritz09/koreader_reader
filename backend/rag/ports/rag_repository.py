@@ -23,7 +23,6 @@ class RagRepository(Protocol):
         self,
         book_id: str,
         model: str,
-        dimensions: int,
         rows: Sequence[tuple[EmbeddingSource, str, list[float]]],
     ) -> None: ...
 
@@ -40,12 +39,15 @@ class RagRepository(Protocol):
         error: str | None = None,
     ) -> str: ...
 
-    async def mark_building(
+    async def claim_build(
         self,
         book_id: str,
         graph_revision: int,
         embedding_model: str,
-    ) -> None: ...
+        stale_after_seconds: int,
+    ) -> bool: ...
+
+    async def mark_pending(self, book_id: str, error: str | None = None) -> None: ...
 
     async def mark_failed(self, book_id: str, error: str) -> None: ...
 
@@ -54,6 +56,7 @@ class RagRepository(Protocol):
         book_id: str,
         graph_revision: int,
         embedding_model: str,
+        stale_after_seconds: int,
     ) -> bool: ...
 
     async def delete_by_book(self, book_id: str) -> None: ...

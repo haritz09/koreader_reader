@@ -6,7 +6,11 @@ import pytest
 
 from rag.application.embeddings import EmbedKnowledgeService, content_hash
 from rag.domain.embeddings import EmbeddingSource, EmbeddingSourceType
-from rag.domain.errors import EmbeddingError, EmbeddingTransientError
+from rag.domain.errors import (
+    EmbeddingError,
+    EmbeddingQuotaExhaustedError,
+    EmbeddingTransientError,
+)
 
 
 class FakeRepository:
@@ -25,20 +29,25 @@ class FakeRepository:
     async def get_existing_hashes(self, book_id: str, model: str):
         return dict(self.existing)
 
-    async def upsert_embeddings(self, book_id, model, dimensions, rows) -> None:
+    async def upsert_embeddings(self, book_id, model, rows) -> None:
         self.rows.extend(rows)
 
 
 class FakeProvider:
     model = "test-embedding"
     dimensions = 2
+    max_batch_size = 2
 
-    def __init__(self, failures: int = 0) -> None:
+    def __init__(self, failures: int = 0, quota_failures: int = 0) -> None:
         self.failures = failures
+        self.quota_failures = quota_failures
         self.calls: list[list[str]] = []
 
     async def embed_documents(self, texts):
         self.calls.append(list(texts))
+        if self.quota_failures:
+            self.quota_failures -= 1
+            raise EmbeddingQuotaExhaustedError("daily quota")
         if self.failures:
             self.failures -= 1
             raise EmbeddingTransientError("temporary")
@@ -114,3 +123,71 @@ def test_invalid_vector_count_raises() -> None:
         asyncio.run(
             service(repository, BrokenProvider(), max_attempts=1).embed_book("book-1")
         )
+
+
+def test_identical_texts_are_embedded_once() -> None:
+    repository = FakeRepository(
+        [
+            source(EmbeddingSourceType.ENTITY, "e1", "Alice (character)"),
+            source(EmbeddingSourceType.ENTITY, "e2", "Alice (character)"),
+            source(EmbeddingSourceType.FACT, "f1", "Alice meets Bob"),
+        ]
+    )
+    provider = FakeProvider()
+
+    summary = asyncio.run(service(repository, provider).embed_book("book-1"))
+
+    assert provider.calls == [["Alice (character)", "Alice meets Bob"]]
+    assert summary.embedded == 3
+    assert len(repository.rows) == 3
+    alice_vectors = {
+        tuple(row[2]) for row in repository.rows if row[0].source_id in {"e1", "e2"}
+    }
+    assert len(alice_vectors) == 1
+    assert {row[0].source_id for row in repository.rows} == {"e1", "e2", "f1"}
+
+
+def test_blank_texts_are_not_sent_to_the_provider() -> None:
+    repository = FakeRepository(
+        [
+            source(EmbeddingSourceType.ENTITY, "e1", "   "),
+            source(EmbeddingSourceType.FACT, "f1", "Alice meets Bob"),
+        ]
+    )
+    provider = FakeProvider()
+
+    summary = asyncio.run(service(repository, provider).embed_book("book-1"))
+
+    assert provider.calls == [["Alice meets Bob"]]
+    assert summary.embedded == 1
+    assert summary.skipped == 1
+    assert [row[0].source_id for row in repository.rows] == ["f1"]
+
+
+def test_daily_quota_is_not_retried() -> None:
+    repository = FakeRepository([source(EmbeddingSourceType.CHUNK, "c1", "text")])
+    provider = FakeProvider(quota_failures=5)
+
+    with pytest.raises(EmbeddingQuotaExhaustedError):
+        asyncio.run(
+            service(repository, provider, max_attempts=3).embed_book("book-1")
+        )
+
+    assert len(provider.calls) == 1
+
+
+def test_batch_size_is_capped_by_the_provider() -> None:
+    class SingleTextProvider(FakeProvider):
+        max_batch_size = 1
+
+    repository = FakeRepository(
+        [
+            source(EmbeddingSourceType.CHUNK, "c1", "one"),
+            source(EmbeddingSourceType.CHUNK, "c2", "two"),
+        ]
+    )
+    provider = SingleTextProvider()
+
+    asyncio.run(service(repository, provider, batch_size=100).embed_book("book-1"))
+
+    assert provider.calls == [["one"], ["two"]]

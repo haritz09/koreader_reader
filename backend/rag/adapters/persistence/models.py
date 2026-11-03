@@ -29,7 +29,7 @@ RAG_INDEX_STATUS_CHECK = f"status IN ({RAG_INDEX_STATUS_VALUES})"
 class RagEmbeddingRecord(Base):
     __tablename__ = "rag_embeddings"
     __table_args__ = (
-        UniqueConstraint("source_type", "source_id", "model"),
+        UniqueConstraint("book_id", "source_type", "source_id", "model"),
         Index("ix_rag_embeddings_book_source_position", "book_id", "source_type", "reading_position"),
         Index("ix_rag_embeddings_book_model", "book_id", "model"),
         CheckConstraint(READING_POSITION_CHECK, name="ck_rag_embeddings_reading_position"),
@@ -47,7 +47,6 @@ class RagEmbeddingRecord(Base):
     )
     reading_position: Mapped[float] = mapped_column(Float, nullable=False)
     model: Mapped[str] = mapped_column(String(128), nullable=False)
-    dimensions: Mapped[int] = mapped_column(Integer, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     embedding: Mapped[list[float]] = mapped_column(
         Vector(EMBEDDING_DIMENSIONS), nullable=False
@@ -103,7 +102,14 @@ class RagCommunityRecord(Base):
 
 class RagCommunityMemberRecord(Base):
     __tablename__ = "rag_community_members"
-    __table_args__ = (Index("ix_rag_community_members_node", "node_id"),)
+    __table_args__ = (
+        Index("ix_rag_community_members_node", "node_id"),
+        Index(
+            "ix_rag_community_members_position",
+            "community_id",
+            "first_seen_position",
+        ),
+    )
 
     community_id: Mapped[str] = mapped_column(
         ForeignKey("rag_communities.id", ondelete="CASCADE"), primary_key=True
@@ -111,6 +117,7 @@ class RagCommunityMemberRecord(Base):
     node_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     node_type: Mapped[str] = mapped_column(String(32), nullable=False)
     weight: Mapped[float] = mapped_column(Float, nullable=False)
+    first_seen_position: Mapped[float] = mapped_column(Float, nullable=False)
 
 
 class RagIndexStateRecord(Base):

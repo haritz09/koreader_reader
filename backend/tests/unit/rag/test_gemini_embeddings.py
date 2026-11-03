@@ -8,7 +8,11 @@ import httpx
 import pytest
 
 from rag.adapters.embeddings.gemini import GeminiEmbeddingProvider
-from rag.domain.errors import EmbeddingConfigurationError, EmbeddingTransientError
+from rag.domain.errors import (
+    EmbeddingConfigurationError,
+    EmbeddingQuotaExhaustedError,
+    EmbeddingTransientError,
+)
 
 
 def test_batch_request_shape_and_normalization() -> None:
@@ -77,3 +81,60 @@ def test_server_errors_are_transient() -> None:
 
     with pytest.raises(EmbeddingTransientError):
         asyncio.run(run())
+
+
+def test_daily_quota_failure_is_not_transient() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={
+                "error": {
+                    "code": 429,
+                    "details": [
+                        {
+                            "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                            "violations": [
+                                {
+                                    "quotaId": (
+                                        "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+                                    ),
+                                    "quotaMetric": "generativelanguage.googleapis.com/generate_content_free_tier_requests",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = GeminiEmbeddingProvider(
+                api_key="secret",
+                model="gemini-embedding-001",
+                dimensions=3,
+                client=client,
+            )
+            await provider.embed_documents(["text"])
+
+    with pytest.raises(EmbeddingQuotaExhaustedError):
+        asyncio.run(run())
+
+
+def test_per_minute_rate_limit_stays_transient() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"Retry-After": "5"}, text="rate limited")
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = GeminiEmbeddingProvider(
+                api_key="secret",
+                model="gemini-embedding-001",
+                dimensions=3,
+                client=client,
+            )
+            await provider.embed_documents(["text"])
+
+    with pytest.raises(EmbeddingTransientError) as raised:
+        asyncio.run(run())
+    assert raised.value.retry_after == 5.0

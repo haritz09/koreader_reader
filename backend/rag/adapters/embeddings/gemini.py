@@ -6,11 +6,15 @@ from collections.abc import Sequence
 import httpx
 
 from core.config import settings
+from lib.http_quota import classify_quota, parse_retry_after
 from rag.domain.errors import (
     EmbeddingConfigurationError,
     EmbeddingPermanentError,
+    EmbeddingQuotaExhaustedError,
     EmbeddingTransientError,
 )
+
+MAX_BATCH_SIZE = 100
 
 
 class GeminiEmbeddingProvider:
@@ -39,6 +43,10 @@ class GeminiEmbeddingProvider:
     @property
     def dimensions(self) -> int:
         return self._dimensions
+
+    @property
+    def max_batch_size(self) -> int:
+        return MAX_BATCH_SIZE
 
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
@@ -93,10 +101,21 @@ class GeminiEmbeddingProvider:
             raise EmbeddingConfigurationError(
                 f"Embedding configuration failed ({status})"
             )
-        if status == 429 or status == 408 or status >= 500:
+        if status == 429:
+            daily, retry_after = classify_quota(response)
+            if daily:
+                raise EmbeddingQuotaExhaustedError(
+                    f"Embedding daily quota exhausted: {detail}",
+                    retry_after,
+                )
+            raise EmbeddingTransientError(
+                f"Embedding rate limit hit: {detail}",
+                retry_after,
+            )
+        if status == 408 or status >= 500:
             raise EmbeddingTransientError(
                 f"Embedding request failed ({status}): {detail}",
-                _retry_after(response.headers.get("Retry-After")),
+                parse_retry_after(response.headers.get("Retry-After")),
             )
         raise EmbeddingPermanentError(f"Embedding request failed ({status}): {detail}")
 
@@ -129,12 +148,3 @@ class GeminiEmbeddingProvider:
                 )
             vectors.append([value / norm for value in vector])
         return vectors
-
-
-def _retry_after(value: str | None) -> float | None:
-    if value is None:
-        return None
-    try:
-        return max(0.0, float(value))
-    except ValueError:
-        return None

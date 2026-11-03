@@ -35,14 +35,13 @@ def upgrade() -> None:
         sa.Column('chunk_id', sa.String(length=255), nullable=True),
         sa.Column('reading_position', sa.Float(), nullable=False),
         sa.Column('model', sa.String(length=128), nullable=False),
-        sa.Column('dimensions', sa.Integer(), nullable=False),
         sa.Column('content_hash', sa.String(length=64), nullable=False),
         sa.Column('embedding', Vector(768), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(['book_id'], ['books.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['chunk_id'], ['chunks.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('source_type', 'source_id', 'model'),
+        sa.UniqueConstraint('book_id', 'source_type', 'source_id', 'model'),
         sa.CheckConstraint(_READING_POSITION, name='ck_rag_embeddings_reading_position'),
         sa.CheckConstraint(
             f'source_type IN ({_SOURCE_TYPE_VALUES})',
@@ -102,12 +101,18 @@ def upgrade() -> None:
         sa.Column('node_id', sa.String(length=255), nullable=False),
         sa.Column('node_type', sa.String(length=32), nullable=False),
         sa.Column('weight', sa.Float(), nullable=False),
+        sa.Column('first_seen_position', sa.Float(), nullable=False),
         sa.ForeignKeyConstraint(
             ['community_id'], ['rag_communities.id'], ondelete='CASCADE'
         ),
         sa.PrimaryKeyConstraint('community_id', 'node_id'),
     )
     op.create_index('ix_rag_community_members_node', 'rag_community_members', ['node_id'])
+    op.create_index(
+        'ix_rag_community_members_position',
+        'rag_community_members',
+        ['community_id', 'first_seen_position'],
+    )
 
     op.create_table(
         'rag_index_states',
@@ -133,6 +138,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table('rag_index_states')
+    op.drop_index(
+        'ix_rag_community_members_position', table_name='rag_community_members'
+    )
     op.drop_index('ix_rag_community_members_node', table_name='rag_community_members')
     op.drop_table('rag_community_members')
     op.drop_index('ix_rag_communities_book_level', table_name='rag_communities')

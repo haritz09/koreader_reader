@@ -2,9 +2,10 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models.book import Book
@@ -13,6 +14,7 @@ from db.models.chunk import ChunkRecord
 from db.models.knowledge import EntityRecord, EventRecord, FactRecord, LocationRecord
 from db.session import engine, session_factory
 from rag.adapters.persistence.models import (
+    RagCommunityMemberRecord,
     RagCommunityRecord,
     RagCommunityRunRecord,
     RagEmbeddingRecord,
@@ -22,7 +24,7 @@ from rag.adapters.persistence.repository import PostgresRagRepository
 from rag.clustering.graph import build_cluster_graph
 from rag.clustering.leiden import LeidenCommunityDetector
 from rag.domain.clustering import ClusterParameters
-from rag.domain.embeddings import EmbeddingSourceType
+from rag.domain.embeddings import EmbeddingSource, EmbeddingSourceType
 from rag.domain.status import RagIndexStatus
 
 pytestmark = pytest.mark.postgres
@@ -210,13 +212,11 @@ def test_embedding_upsert_is_idempotent() -> None:
         await repository.upsert_embeddings(
             BOOK_ID,
             "gemini-embedding-001",
-            768,
             [(chunk, "first-hash", vector())],
         )
         await repository.upsert_embeddings(
             BOOK_ID,
             "gemini-embedding-001",
-            768,
             [(chunk, "second-hash", vector(0.5))],
         )
 
@@ -250,7 +250,9 @@ def test_community_run_is_stored_and_swapped_atomically() -> None:
             tree=tree,
             status=RagIndexStatus.READY,
         )
-        assert await repository.needs_build(BOOK_ID, 0, "gemini-embedding-001") is False
+        assert await repository.needs_build(
+            BOOK_ID, 0, "gemini-embedding-001", 3600
+        ) is False
 
         second_run = await repository.save_community_run(
             BOOK_ID,
@@ -295,7 +297,7 @@ def test_delete_by_book_clears_the_index() -> None:
         embeddings = await repository.get_embedding_sources(BOOK_ID)
         chunk = embeddings[0]
         await repository.upsert_embeddings(
-            BOOK_ID, "gemini-embedding-001", 768, [(chunk, "hash", vector())]
+            BOOK_ID, "gemini-embedding-001", [(chunk, "hash", vector())]
         )
 
         await repository.delete_by_book(BOOK_ID)
@@ -307,6 +309,100 @@ def test_delete_by_book_clears_the_index() -> None:
             RagIndexStateRecord,
         ):
             assert await session.scalar(select(func.count()).select_from(model)) == 0
+
+    run_against_postgres(work)
+
+
+def test_claim_build_is_exclusive_and_reclaims_a_stale_building_state() -> None:
+    async def work(session: AsyncSession) -> None:
+        repository = PostgresRagRepository(session)
+
+        assert await repository.claim_build(BOOK_ID, 2, "model", 3600) is True
+        assert await repository.claim_build(BOOK_ID, 2, "model", 3600) is False
+
+        await session.execute(
+            update(RagIndexStateRecord)
+            .where(RagIndexStateRecord.book_id == BOOK_ID)
+            .values(updated_at=datetime.now(UTC) - timedelta(seconds=7200))
+        )
+        await session.commit()
+
+        assert await repository.claim_build(BOOK_ID, 2, "model", 3600) is True
+
+    run_against_postgres(work)
+
+
+def test_pending_build_is_retried_even_without_a_revision_change() -> None:
+    async def work(session: AsyncSession) -> None:
+        repository = PostgresRagRepository(session)
+
+        assert await repository.claim_build(BOOK_ID, 2, "model", 3600) is True
+        await repository.mark_pending(BOOK_ID, "daily quota")
+
+        assert await repository.needs_build(BOOK_ID, 2, "model", 3600) is True
+
+    run_against_postgres(work)
+
+
+def test_community_members_store_their_first_seen_position() -> None:
+    async def work(session: AsyncSession) -> None:
+        repository = PostgresRagRepository(session)
+        sources = await repository.get_cluster_sources(BOOK_ID)
+        graph = build_cluster_graph(BOOK_ID, sources, PARAMETERS)
+        tree = LeidenCommunityDetector().detect(graph, PARAMETERS)
+        await repository.save_community_run(
+            BOOK_ID,
+            graph_revision=0,
+            embedding_model="gemini-embedding-001",
+            graph=graph,
+            tree=tree,
+            status=RagIndexStatus.READY,
+        )
+
+        positions = {node.node_id: node.reading_position for node in graph.nodes}
+        rows = (await session.execute(select(RagCommunityMemberRecord))).scalars().all()
+
+        assert rows
+        for row in rows:
+            assert row.first_seen_position == pytest.approx(positions[row.node_id])
+
+    run_against_postgres(work)
+
+
+def test_embedding_uniqueness_is_scoped_to_a_book() -> None:
+    async def work(session: AsyncSession) -> None:
+        repository = PostgresRagRepository(session)
+        session.add(
+            Book(
+                id="rag-book-2",
+                document_hash="rag-document-hash-2",
+                storage_key="books/rag-2.epub",
+                processing_status="ready",
+            )
+        )
+        await session.commit()
+
+        shared = EmbeddingSource(
+            source_type=EmbeddingSourceType.ENTITY,
+            source_id="shared-entity",
+            chunk_id=None,
+            reading_position=0.1,
+            text="Shared entity",
+        )
+
+        await repository.upsert_embeddings(
+            BOOK_ID, "gemini-embedding-001", [(shared, "hash-1", vector())]
+        )
+        await repository.upsert_embeddings(
+            "rag-book-2", "gemini-embedding-001", [(shared, "hash-2", vector())]
+        )
+
+        count = await session.scalar(
+            select(func.count())
+            .select_from(RagEmbeddingRecord)
+            .where(RagEmbeddingRecord.source_id == "shared-entity")
+        )
+        assert count == 2
 
     run_against_postgres(work)
 

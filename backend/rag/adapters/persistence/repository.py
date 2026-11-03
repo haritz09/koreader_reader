@@ -3,9 +3,9 @@
 import uuid
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -206,7 +206,6 @@ class PostgresRagRepository:
         self,
         book_id: str,
         model: str,
-        dimensions: int,
         rows: Sequence[tuple[EmbeddingSource, str, list[float]]],
     ) -> None:
         if not rows:
@@ -221,7 +220,6 @@ class PostgresRagRepository:
                     "chunk_id": source.chunk_id,
                     "reading_position": source.reading_position,
                     "model": model,
-                    "dimensions": dimensions,
                     "content_hash": digest,
                     "embedding": vector,
                 }
@@ -230,6 +228,7 @@ class PostgresRagRepository:
         )
         statement = statement.on_conflict_do_update(
             index_elements=[
+                RagEmbeddingRecord.book_id,
                 RagEmbeddingRecord.source_type,
                 RagEmbeddingRecord.source_id,
                 RagEmbeddingRecord.model,
@@ -237,7 +236,6 @@ class PostgresRagRepository:
             set_={
                 "chunk_id": statement.excluded.chunk_id,
                 "reading_position": statement.excluded.reading_position,
-                "dimensions": statement.excluded.dimensions,
                 "content_hash": statement.excluded.content_hash,
                 "embedding": statement.excluded.embedding,
             },
@@ -380,6 +378,7 @@ class PostgresRagRepository:
 
         node_types = {node.node_id: node.node_type for node in graph.nodes}
         node_weights = {node.node_id: float(node.mention_count) for node in graph.nodes}
+        node_positions = {node.node_id: node.reading_position for node in graph.nodes}
 
         by_level: dict[int, list] = defaultdict(list)
         for community in tree.communities:
@@ -410,6 +409,9 @@ class PostgresRagRepository:
                         node_id=node_id,
                         node_type=node_types.get(node_id, "other"),
                         weight=node_weights.get(node_id, 1.0),
+                        first_seen_position=node_positions.get(
+                            node_id, community.first_seen_position
+                        ),
                     )
                 )
 
@@ -436,30 +438,61 @@ class PostgresRagRepository:
         await self._session.commit()
         return run_id
 
-    async def mark_building(
+    async def claim_build(
         self,
         book_id: str,
         graph_revision: int,
         embedding_model: str,
-    ) -> None:
+        stale_after_seconds: int,
+    ) -> bool:
+        now = datetime.now(UTC)
+        stale_before = now - timedelta(seconds=max(0, stale_after_seconds))
+        statement = pg_insert(RagIndexStateRecord).values(
+            book_id=book_id,
+            rag_revision=0,
+            status=RagIndexStatus.BUILDING.value,
+            graph_revision=graph_revision,
+            current_run_id=None,
+            embedding_model=embedding_model,
+            error=None,
+        )
+        statement = statement.on_conflict_do_update(
+            index_elements=[RagIndexStateRecord.book_id],
+            set_={
+                "status": RagIndexStatus.BUILDING.value,
+                "graph_revision": graph_revision,
+                "embedding_model": embedding_model,
+                "error": None,
+                "updated_at": now,
+            },
+            where=or_(
+                RagIndexStateRecord.status != RagIndexStatus.BUILDING.value,
+                RagIndexStateRecord.graph_revision != graph_revision,
+                RagIndexStateRecord.embedding_model != embedding_model,
+                RagIndexStateRecord.updated_at < stale_before,
+            ),
+        ).returning(RagIndexStateRecord.book_id)
+        result = await self._session.execute(statement)
+        await self._session.commit()
+        return result.scalar_one_or_none() is not None
+
+    async def mark_pending(self, book_id: str, error: str | None = None) -> None:
         state = await self._session.get(RagIndexStateRecord, book_id)
         if state is None:
             self._session.add(
                 RagIndexStateRecord(
                     book_id=book_id,
                     rag_revision=0,
-                    status=RagIndexStatus.BUILDING.value,
-                    graph_revision=graph_revision,
+                    status=RagIndexStatus.PENDING.value,
+                    graph_revision=0,
                     current_run_id=None,
-                    embedding_model=embedding_model,
-                    error=None,
+                    embedding_model="",
+                    error=error,
                 )
             )
         else:
-            state.status = RagIndexStatus.BUILDING.value
-            state.graph_revision = graph_revision
-            state.embedding_model = embedding_model
-            state.error = None
+            state.status = RagIndexStatus.PENDING.value
+            state.error = error
             state.updated_at = datetime.now(UTC)
         await self._session.commit()
 
@@ -488,6 +521,7 @@ class PostgresRagRepository:
         book_id: str,
         graph_revision: int,
         embedding_model: str,
+        stale_after_seconds: int,
     ) -> bool:
         state = await self._session.get(RagIndexStateRecord, book_id)
         if state is None:
@@ -498,7 +532,10 @@ class PostgresRagRepository:
         ):
             return True
         if state.status == RagIndexStatus.BUILDING.value:
-            return False
+            stale_before = datetime.now(UTC) - timedelta(
+                seconds=max(0, stale_after_seconds)
+            )
+            return state.updated_at < stale_before
         return state.status not in {
             status.value for status in RAG_INDEX_CURRENT_STATUSES
         }

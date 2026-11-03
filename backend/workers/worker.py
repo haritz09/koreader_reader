@@ -33,6 +33,7 @@ from rag.clustering.leiden import LeidenCommunityDetector
 from rag.clustering.service import CommunityBuilder
 from rag.domain.clustering import ClusterParameters
 from rag.domain.embeddings import EMBEDDING_DIMENSIONS
+from rag.domain.errors import RagBuildDeferred
 from rag.ports.embedding_provider import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,7 @@ def _cluster_parameters() -> ClusterParameters:
 		resolution=settings.community_resolution,
 		max_levels=settings.community_max_levels,
 		min_size=settings.community_min_size,
+		min_members=settings.community_min_members,
 		seed=settings.community_seed,
 		objective="modularity",
 		fact_edge_weight=settings.community_fact_edge_weight,
@@ -261,7 +263,10 @@ async def _enqueue_rag_build_if_needed(ctx: dict, book_id: str) -> None:
 			repository = ctx["rag_repository_factory"](session)
 			graph_revision = await repository.get_graph_revision(book_id)
 			if not await repository.needs_build(
-				book_id, graph_revision, settings.embedding_model
+				book_id,
+				graph_revision,
+				settings.embedding_model,
+				settings.rag_build_stale_seconds,
 			):
 				return
 		await ctx["rag_queue"].enqueue(
@@ -277,10 +282,6 @@ async def build_rag_index(ctx: dict, book_id: str) -> None:
 	async with ctx["session_factory"]() as session:
 		repository = ctx["rag_repository_factory"](session)
 		graph_revision = await repository.get_graph_revision(book_id)
-		if not await repository.needs_build(book_id, graph_revision, provider.model):
-			logger.info("RAG index for book %s is already current", book_id)
-			return
-
 		use_case = BuildRagIndexUseCase(
 			repository,
 			EmbedKnowledgeService(
@@ -298,8 +299,20 @@ async def build_rag_index(ctx: dict, book_id: str) -> None:
 				_cluster_parameters(),
 			),
 			provider.model,
+			stale_after_seconds=settings.rag_build_stale_seconds,
 		)
-		await use_case.execute(book_id, graph_revision)
+		try:
+			await use_case.execute(book_id, graph_revision)
+		except RagBuildDeferred as deferred:
+			await ctx["rag_queue"].enqueue(
+				book_id,
+				graph_revision,
+				provider.model,
+				defer_by_seconds=max(
+					deferred.retry_after or 0,
+					settings.embedding_quota_defer_seconds,
+				),
+			)
 
 
 class WorkerSettings:

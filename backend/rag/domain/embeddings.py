@@ -35,3 +35,4 @@ class EmbeddingSummary:
     total: int
     embedded: int
     reused: int
+    skipped: int = 0

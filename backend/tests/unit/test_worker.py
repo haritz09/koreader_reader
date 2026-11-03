@@ -50,11 +50,23 @@ class FakeKnowledgeRepository:
 
 
 class FakeRagRepository:
-	def __init__(self, needs_build: bool = False) -> None:
+	def __init__(
+		self,
+		needs_build: bool = False,
+		*,
+		claim_result: bool = True,
+		sources=None,
+	) -> None:
 		self.needs_build_value = needs_build
+		self.claim_result = claim_result
+		self.sources = list(sources or [])
 		self.revision = 0
 		self.deleted: list[str] = []
-		self.checked: list[tuple[str, int, str]] = []
+		self.checked: list[tuple] = []
+		self.claims: list[tuple] = []
+		self.pending: list[tuple[str, str | None]] = []
+		self.failures: list[tuple[str, str]] = []
+		self.rows: list = []
 
 	async def delete_by_book(self, book_id: str) -> None:
 		self.deleted.append(book_id)
@@ -63,10 +75,43 @@ class FakeRagRepository:
 		return self.revision
 
 	async def needs_build(
-		self, book_id: str, graph_revision: int, embedding_model: str
+		self,
+		book_id: str,
+		graph_revision: int,
+		embedding_model: str,
+		stale_after_seconds: int,
 	) -> bool:
-		self.checked.append((book_id, graph_revision, embedding_model))
+		self.checked.append(
+			(book_id, graph_revision, embedding_model, stale_after_seconds)
+		)
 		return self.needs_build_value
+
+	async def claim_build(
+		self,
+		book_id: str,
+		graph_revision: int,
+		embedding_model: str,
+		stale_after_seconds: int,
+	) -> bool:
+		self.claims.append(
+			(book_id, graph_revision, embedding_model, stale_after_seconds)
+		)
+		return self.claim_result
+
+	async def mark_pending(self, book_id: str, error: str | None = None) -> None:
+		self.pending.append((book_id, error))
+
+	async def mark_failed(self, book_id: str, error: str) -> None:
+		self.failures.append((book_id, error))
+
+	async def get_embedding_sources(self, book_id: str):
+		return list(self.sources)
+
+	async def get_existing_hashes(self, book_id: str, model: str):
+		return {}
+
+	async def upsert_embeddings(self, book_id, model, rows) -> None:
+		self.rows.extend(rows)
 
 
 class FakeGraphQueue:
@@ -80,11 +125,22 @@ class FakeGraphQueue:
 class FakeRagQueue:
 	def __init__(self) -> None:
 		self.enqueued: list[tuple[str, int, str]] = []
+		self.deferred: list[tuple[str, int, str, float]] = []
 
 	async def enqueue(
-		self, book_id: str, graph_revision: int, embedding_model: str
+		self,
+		book_id: str,
+		graph_revision: int,
+		embedding_model: str,
+		*,
+		defer_by_seconds: float | None = None,
 	) -> None:
-		self.enqueued.append((book_id, graph_revision, embedding_model))
+		if defer_by_seconds is None:
+			self.enqueued.append((book_id, graph_revision, embedding_model))
+		else:
+			self.deferred.append(
+				(book_id, graph_revision, embedding_model, defer_by_seconds)
+			)
 
 
 class FakeParser:
@@ -124,6 +180,14 @@ class FakeLLM:
 class FakeEmbeddings:
 	model = settings.embedding_model
 	dimensions = settings.embedding_dimensions
+	max_batch_size = 100
+
+
+class QuotaEmbeddings(FakeEmbeddings):
+	async def embed_documents(self, texts):
+		from rag.domain.errors import EmbeddingQuotaExhaustedError
+
+		raise EmbeddingQuotaExhaustedError("daily quota")
 
 
 class FakeExtraction:
@@ -454,3 +518,57 @@ def test_graph_job_swallows_a_resolution_failure_without_raising() -> None:
 
 	assert book_repository.applied == []
 	assert book_repository.revision_bumps == []
+
+
+def embedding_source():
+	from rag.domain.embeddings import EmbeddingSource, EmbeddingSourceType
+
+	return EmbeddingSource(
+		source_type=EmbeddingSourceType.CHUNK,
+		source_id="chunk-1",
+		chunk_id="chunk-1",
+		reading_position=0.1,
+		text="some text",
+	)
+
+
+def test_build_job_skips_when_another_job_holds_the_claim() -> None:
+	rag_repository = FakeRagRepository(claim_result=False)
+	ctx = make_ctx(FakeRepository(), rag_repository=rag_repository)
+
+	asyncio.run(worker_module.build_rag_index(ctx, "book-123"))
+
+	assert rag_repository.claims == [
+		(
+			"book-123",
+			0,
+			settings.embedding_model,
+			settings.rag_build_stale_seconds,
+		)
+	]
+	assert rag_repository.rows == []
+
+
+def test_build_job_defers_after_daily_quota_exhaustion() -> None:
+	rag_repository = FakeRagRepository(sources=[embedding_source()])
+	rag_queue = FakeRagQueue()
+	ctx = make_ctx(
+		FakeRepository(),
+		rag_repository=rag_repository,
+		rag_queue=rag_queue,
+	)
+	ctx["embedding_provider"] = QuotaEmbeddings()
+
+	asyncio.run(worker_module.build_rag_index(ctx, "book-123"))
+
+	assert rag_repository.pending == [("book-123", "daily quota")]
+	assert rag_repository.rows == []
+	assert rag_queue.enqueued == []
+	assert rag_queue.deferred == [
+		(
+			"book-123",
+			0,
+			settings.embedding_model,
+			settings.embedding_quota_defer_seconds,
+		)
+	]
