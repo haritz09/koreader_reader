@@ -7,6 +7,7 @@ These instructions apply to the entire repository. Read the relevant skill befor
 
 - `.agents/skills/fastapi-clean-architecture/SKILL.md`
 - `.agents/skills/rag-anti-spoiler/SKILL.md`
+- `.agents/skills/reading-progress-adapters/SKILL.md`
 - `.agents/skills/ponytail/SKILL.md`
 
 ## Non-negotiable project rules
