@@ -43,8 +43,23 @@ class PostgresRagRepository:
         return int(result.scalar_one_or_none() or 0)
 
     async def get_embedding_sources(self, book_id: str) -> list[EmbeddingSource]:
-        sources: list[EmbeddingSource] = []
+        sources = [
+            *await self._chunk_sources(book_id),
+            *await self._entity_sources(book_id),
+            *await self._fact_sources(book_id),
+            *await self._event_sources(book_id),
+            *await self._location_sources(book_id),
+        ]
+        sources.sort(
+            key=lambda source: (
+                source.source_type.value,
+                source.reading_position,
+                source.source_id,
+            )
+        )
+        return sources
 
+    async def _chunk_sources(self, book_id: str) -> list[EmbeddingSource]:
         chunks = await self._session.execute(
             select(
                 ChunkRecord.id,
@@ -54,17 +69,18 @@ class PostgresRagRepository:
             .where(ChunkRecord.book_id == book_id)
             .order_by(ChunkRecord.chunk_index, ChunkRecord.id)
         )
-        for chunk_id, text, position in chunks.all():
-            sources.append(
-                EmbeddingSource(
-                    source_type=EmbeddingSourceType.CHUNK,
-                    source_id=chunk_id,
-                    chunk_id=chunk_id,
-                    reading_position=position,
-                    text=text,
-                )
+        return [
+            EmbeddingSource(
+                source_type=EmbeddingSourceType.CHUNK,
+                source_id=chunk_id,
+                chunk_id=chunk_id,
+                reading_position=position,
+                text=text,
             )
+            for chunk_id, text, position in chunks.all()
+        ]
 
+    async def _entity_sources(self, book_id: str) -> list[EmbeddingSource]:
         entities = await self._session.execute(
             select(
                 EntityRecord.id,
@@ -78,24 +94,28 @@ class PostgresRagRepository:
             .where(EntityRecord.book_id == book_id)
             .order_by(EntityRecord.reading_position, EntityRecord.id)
         )
-        for entity_id, chunk_id, name, entity_type, description, aliases, position in (
-            entities.all()
-        ):
-            text = "\n".join(
-                part
-                for part in (f"{name} ({entity_type})", description, *(aliases or ()))
-                if part
+        return [
+            EmbeddingSource(
+                source_type=EmbeddingSourceType.ENTITY,
+                source_id=entity_id,
+                chunk_id=chunk_id,
+                reading_position=position,
+                text="\n".join(
+                    part
+                    for part in (
+                        f"{name} ({entity_type})",
+                        description,
+                        *(aliases or ()),
+                    )
+                    if part
+                ),
             )
-            sources.append(
-                EmbeddingSource(
-                    source_type=EmbeddingSourceType.ENTITY,
-                    source_id=entity_id,
-                    chunk_id=chunk_id,
-                    reading_position=position,
-                    text=text,
-                )
+            for entity_id, chunk_id, name, entity_type, description, aliases, position in (
+                entities.all()
             )
+        ]
 
+    async def _fact_sources(self, book_id: str) -> list[EmbeddingSource]:
         facts = await self._session.execute(
             select(
                 FactRecord.id,
@@ -106,17 +126,18 @@ class PostgresRagRepository:
             .where(FactRecord.book_id == book_id)
             .order_by(FactRecord.reading_position, FactRecord.id)
         )
-        for fact_id, chunk_id, statement, position in facts.all():
-            sources.append(
-                EmbeddingSource(
-                    source_type=EmbeddingSourceType.FACT,
-                    source_id=fact_id,
-                    chunk_id=chunk_id,
-                    reading_position=position,
-                    text=statement,
-                )
+        return [
+            EmbeddingSource(
+                source_type=EmbeddingSourceType.FACT,
+                source_id=fact_id,
+                chunk_id=chunk_id,
+                reading_position=position,
+                text=statement,
             )
+            for fact_id, chunk_id, statement, position in facts.all()
+        ]
 
+    async def _event_sources(self, book_id: str) -> list[EmbeddingSource]:
         events = await self._session.execute(
             select(
                 EventRecord.id,
@@ -128,17 +149,18 @@ class PostgresRagRepository:
             .where(EventRecord.book_id == book_id)
             .order_by(EventRecord.reading_position, EventRecord.id)
         )
-        for event_id, chunk_id, name, description, position in events.all():
-            sources.append(
-                EmbeddingSource(
-                    source_type=EmbeddingSourceType.EVENT,
-                    source_id=event_id,
-                    chunk_id=chunk_id,
-                    reading_position=position,
-                    text="\n".join(part for part in (name, description) if part),
-                )
+        return [
+            EmbeddingSource(
+                source_type=EmbeddingSourceType.EVENT,
+                source_id=event_id,
+                chunk_id=chunk_id,
+                reading_position=position,
+                text="\n".join(part for part in (name, description) if part),
             )
+            for event_id, chunk_id, name, description, position in events.all()
+        ]
 
+    async def _location_sources(self, book_id: str) -> list[EmbeddingSource]:
         locations = await self._session.execute(
             select(
                 LocationRecord.id,
@@ -150,25 +172,16 @@ class PostgresRagRepository:
             .where(LocationRecord.book_id == book_id)
             .order_by(LocationRecord.reading_position, LocationRecord.id)
         )
-        for location_id, chunk_id, name, description, position in locations.all():
-            sources.append(
-                EmbeddingSource(
-                    source_type=EmbeddingSourceType.LOCATION,
-                    source_id=location_id,
-                    chunk_id=chunk_id,
-                    reading_position=position,
-                    text="\n".join(part for part in (name, description) if part),
-                )
+        return [
+            EmbeddingSource(
+                source_type=EmbeddingSourceType.LOCATION,
+                source_id=location_id,
+                chunk_id=chunk_id,
+                reading_position=position,
+                text="\n".join(part for part in (name, description) if part),
             )
-
-        sources.sort(
-            key=lambda source: (
-                source.source_type.value,
-                source.reading_position,
-                source.source_id,
-            )
-        )
-        return sources
+            for location_id, chunk_id, name, description, position in locations.all()
+        ]
 
     async def get_existing_hashes(
         self,
