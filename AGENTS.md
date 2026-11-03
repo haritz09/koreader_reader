@@ -20,6 +20,7 @@ These instructions apply to the entire repository. Read the relevant skill befor
 - Chat responses must include a typed `sources` array with the exact `chunk_id` values used for the answer.
 - Keep the core domain provider-agnostic. KOReader details belong only in the adapter layer.
 - Progress synchronization must be asynchronous and expensive extraction work must run in a background queue.
+- Apply the Single Responsibility Principle at every level. Each function does one thing and has one reason to change; split any function that does several things (queries several source types, validates, transforms, and persists) into small focused functions instead of growing branches. No 100+ line functions with mixed responsibilities.
 - Define each shared status, set, or literal once in a canonical module; production code imports it. Tests may assert raw values to protect the public contract.
 - Type closed vocabularies explicitly (`Literal`/`StrEnum` in Python, union types in TypeScript), never as bare `str` or `string`.
 - Never commit generated artifacts such as `*.tsbuildinfo`, `.next/`, or tool caches.

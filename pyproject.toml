@@ -25,7 +25,9 @@ known-first-party = [
     "api",
     "core",
     "db",
+    "lib",
     "main",
+    "rag",
     "tests",
     "workers",
 ]

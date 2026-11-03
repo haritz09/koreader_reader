@@ -6,7 +6,7 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 
 - API-first backend; the planned client is Next.js with TypeScript.
 - Knowledge is hierarchical: books, chapters, chunks, entities, events, locations, facts. It is not a single static summary.
-- Answers must be traceable to source text. The deliverable is a knowledge graph; RAG, embeddings, chunk retrieval, and chat are not implemented.
+- Answers must be traceable to source text. Embeddings and hierarchical knowledge communities are indexed under `backend/rag/`; queries, chat, cluster summaries, and graph generation from communities are not implemented.
 - EPUB uploads use the MD5 hash of the binary as the KOReader document identity.
 - Processing is asynchronous through ARQ. The source file is deleted after successful processing; derived chapters and chunks remain.
 - Chunk indices are globally monotonic per book. Chunks target 300-500 tokens with 50-100 tokens of overlap, so percentage ranges may overlap.
@@ -44,6 +44,25 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 - `entity_type` is a closed vocabulary: `character`, `enemy`, `artifact`, `organization`, `concept`, plus code-only fallback `other`. `location` and `event` are node types, never entity types. The database `CHECK` enforces this.
 - Entity descriptions, subtypes, and aliases are position-derived, never read from a canonical row.
 - Events and locations are first-class graph nodes. They are grouped at read time by normalized name; the earliest visible mention supplies the node id.
+
+## GraphRAG Index
+
+- `backend/rag/` owns embeddings and hierarchical communities. It depends on ports, not vendors: `EmbeddingProvider`, `CommunityDetector`, `RagRepository`, and `RagIndexQueue`.
+- Embeddings are stored per source row, not per canonical node: chunk, entity mention, fact, event, and location rows each carry their own `reading_position`. Aggregated canonical-node profiles would hide when text became visible.
+- Gemini is the current adapter: `gemini-embedding-001`, 768 dimensions, `RETRIEVAL_DOCUMENT`, vectors normalized by the adapter, stored in `vector(768)`. There is no ANN index in v1; retrieval scans exact vectors filtered by book.
+- `EMBEDDING_PROVIDER=mock` requires `ALLOW_MOCK_EMBEDDINGS=true`. The e2e stack uses it so CI never calls a real embedding API.
+- The cluster graph uses canonical entity nodes plus `location:{normalized_name}` and `event:{normalized_name}` nodes. Edges come from chunk co-occurrence and resolved facts; ambiguous or unresolved fact endpoints produce no edge.
+- Communities are hierarchical Leiden (`leidenalg` + `igraph`) with a fixed seed and `RBConfigurationVertexPartition`. Community ids are `uuid5(book_id, level, seed_node_id)`; `signature_hash` detects when a community's membership changes.
+- Cluster structure is computed over the whole book. Any future read path must filter community members and metrics by `reading_position`; never expose post-position members or summaries.
+- `rag_index_states` has its own status vocabulary: `pending`, `building`, `ready`, `partial`, `failed`. It never changes or mirrors the book processing lifecycle.
+- A RAG build is needed when the graph revision or embedding model changes, the index is missing or failed, or a build was deferred for quota. A stale `building` state is reclaimed after `RAG_BUILD_STALE_SECONDS` (default 7200); `claim_build` makes the claim atomic with `INSERT ... ON CONFLICT ... WHERE ... RETURNING`, so two jobs never build the same book at once.
+- Daily embedding quota is distinct from a per-minute rate limit. It marks the index `pending` and re-enqueues the job with a defer, so the build recovers on its own; per-minute limits stay transient and retry in-process. A deferred retry uses its own ARQ job id because reusing the running id is silently dropped.
+- Embedding texts are deduplicated by content hash and blank texts are skipped before the provider call. Batch size is capped by `EmbeddingProvider.max_batch_size`; the Gemini adapter allows 100 texts per request.
+- Hierarchical communities drop leaves smaller than `COMMUNITY_MIN_MEMBERS` (default 2) at every level. A community with children is never dropped, because its children still point to it. The run parameters record `unclustered_nodes` so oversized orphan sets are visible.
+- `rag_community_members` stores each node's `first_seen_position`, so a future read path can filter members by reading position without joining the knowledge tables.
+- Reprocessing a book deletes its RAG index before `replace_derived_content`.
+- `build_rag_index` is a separate ARQ job queued by `generate_graph`. The graph job remains non-fatal; queueing failures are logged. `BuildRagIndexUseCase` records permanent failures without re-raising, marks quota exhaustion `pending` and defers, and re-raises transient failures so ARQ retries.
+- Postgres uses the `pgvector/pgvector:pg16` image in Compose and CI; the migration creates the `vector` extension.
 
 ## LLM Extraction
 
