@@ -88,3 +88,71 @@ def test_detection_is_reproducible() -> None:
     second = LeidenCommunityDetector().detect(graph, PARAMETERS)
 
     assert first == second
+
+
+def test_isolated_nodes_do_not_become_singleton_communities() -> None:
+    graph = ClusterGraph(
+        book_id="book-1",
+        nodes=tuple(
+            (
+                *complete_graph("a", [0.0, 0.1, 0.2, 0.3]),
+                ClusterNode(
+                    node_id="lonely",
+                    node_type="character",
+                    label="Lonely",
+                    reading_position=0.9,
+                    mention_count=1,
+                ),
+            )
+        ),
+        edges=tuple(complete_edges("a", 4)),
+    )
+
+    tree = LeidenCommunityDetector().detect(graph, PARAMETERS)
+
+    assert tree.communities
+    assert all(len(community.member_ids) >= 2 for community in tree.communities)
+    assert tree.parameters["unclustered_nodes"] == 1
+
+
+def test_max_levels_counts_total_levels(monkeypatch) -> None:
+    import rag.clustering.leiden as leiden_module
+
+    def fake_partition(graph, parameters):
+        size = graph.vcount()
+        if size == 8:
+            return [[0, 1, 2, 3], [4, 5, 6, 7]]
+        if size == 4:
+            return [[0, 1], [2, 3]]
+        if size == 2:
+            return [[0], [1]]
+        return [[0]]
+
+    monkeypatch.setattr(leiden_module, "_partition", fake_partition)
+
+    nodes = tuple(complete_graph("a", [index / 10 for index in range(8)]))
+    graph = ClusterGraph(
+        book_id="book-1",
+        nodes=nodes,
+        edges=tuple(
+            ClusterEdge(source_id=f"a{index}", target_id=f"a{index + 1}", weight=1.0)
+            for index in range(7)
+        ),
+    )
+
+    def levels(max_levels: int) -> set[int]:
+        parameters = ClusterParameters(
+            resolution=1.0,
+            max_levels=max_levels,
+            min_size=1,
+            min_members=1,
+            seed=42,
+            objective="cpm",
+            fact_edge_weight=2.0,
+            cooccurrence_edge_weight=1.0,
+        )
+        tree = LeidenCommunityDetector().detect(graph, parameters)
+        return {community.level for community in tree.communities}
+
+    assert levels(3) == {0, 1, 2}
+    assert levels(2) == {0, 1}

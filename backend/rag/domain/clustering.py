@@ -94,3 +94,4 @@ class ClusterParameters:
     fact_edge_weight: float
     cooccurrence_edge_weight: float
     max_nodes_per_chunk: int = 50
+    min_members: int = 2

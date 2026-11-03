@@ -92,8 +92,12 @@ def build_cluster_graph(
                 name_index[key] = node_id
 
     edge_weights: dict[tuple[str, str], float] = defaultdict(float)
+    mention_counts = {node.node_id: node.mention_count for node in nodes}
     for node_ids in chunk_nodes.values():
-        ordered = sorted(node_ids)
+        ordered = sorted(
+            node_ids,
+            key=lambda node_id: (-mention_counts[node_id], node_id),
+        )
         if len(ordered) > parameters.max_nodes_per_chunk:
             ordered = ordered[: parameters.max_nodes_per_chunk]
         for source_id, target_id in combinations(ordered, 2):

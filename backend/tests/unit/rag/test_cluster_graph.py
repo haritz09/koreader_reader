@@ -144,3 +144,33 @@ def test_graph_output_is_deterministic() -> None:
 
     assert first == second
     assert [node.node_id for node in first.nodes] == ["c1", "c2"]
+
+
+def test_chunk_truncation_keeps_the_most_mentioned_nodes() -> None:
+    sources = ClusterSources(
+        entity_mentions=(
+            entity("e1", "c1", "Rare", "ck1", 0.1),
+            entity("e2", "c2", "Common", "ck1", 0.2),
+            entity("e3", "c2", "Common", "ck1", 0.2),
+            entity("e4", "c2", "Common", "ck1", 0.2),
+            entity("e5", "c3", "Middle", "ck1", 0.3),
+            entity("e6", "c3", "Middle", "ck1", 0.3),
+        ),
+        named_mentions=(),
+        facts=(),
+    )
+    parameters = ClusterParameters(
+        resolution=1.0,
+        max_levels=2,
+        min_size=2,
+        seed=42,
+        objective="modularity",
+        fact_edge_weight=2.0,
+        cooccurrence_edge_weight=1.0,
+        max_nodes_per_chunk=2,
+    )
+
+    graph = build_cluster_graph("book-1", sources, parameters)
+
+    assert edge_weight(graph, "c2", "c3") == pytest.approx(1.0)
+    assert all("c1" not in {edge.source_id, edge.target_id} for edge in graph.edges)

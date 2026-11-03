@@ -14,6 +14,8 @@ from rag.domain.clustering import (
     CommunityTree,
 )
 
+UNCLUSTERED_NODES_KEY = "unclustered_nodes"
+
 
 class LeidenCommunityDetector:
     def detect(
@@ -23,13 +25,15 @@ class LeidenCommunityDetector:
     ) -> CommunityTree:
         nodes = sorted(graph.nodes, key=lambda node: node.node_id)
         if not nodes:
+            empty_parameters = asdict(parameters)
+            empty_parameters[UNCLUSTERED_NODES_KEY] = 0
             return CommunityTree(
                 communities=(),
                 node_count=0,
                 edge_count=0,
                 modularity=None,
                 algorithm="leiden",
-                parameters=asdict(parameters),
+                parameters=empty_parameters,
             )
 
         vertex_index = {node.node_id: index for index, node in enumerate(nodes)}
@@ -68,13 +72,18 @@ class LeidenCommunityDetector:
             communities=communities,
         )
 
+        kept = _keep_sized_communities(communities, parameters.min_members)
+        covered = {node_id for community in kept for node_id in community.member_ids}
+        run_parameters = asdict(parameters)
+        run_parameters[UNCLUSTERED_NODES_KEY] = len(nodes) - len(covered)
+
         return CommunityTree(
-            communities=tuple(communities),
+            communities=tuple(kept),
             node_count=len(nodes),
             edge_count=len(edges),
             modularity=modularity,
             algorithm="leiden",
-            parameters=asdict(parameters),
+            parameters=run_parameters,
         )
 
 
@@ -107,7 +116,8 @@ def _collect(
     communities: list[Community],
 ) -> None:
     groups = [sorted(group) for group in partition]
-    for group in groups:
+    internal_weights = _internal_weights(graph, groups)
+    for group, internal_weight in zip(groups, internal_weights, strict=True):
         member_ids = tuple(sorted(node_ids[index] for index in group))
         if not member_ids:
             continue
@@ -133,12 +143,12 @@ def _collect(
                 member_ids=member_ids,
                 seed_node_id=seed_node_id,
                 first_seen_position=first_seen_position,
-                internal_weight=_internal_weight(graph, group),
+                internal_weight=internal_weight,
                 signature_hash=signature,
             )
         )
 
-        if level >= parameters.max_levels or len(group) < parameters.min_size:
+        if level + 1 >= parameters.max_levels or len(group) < parameters.min_size:
             continue
 
         subgraph = graph.induced_subgraph(group)
@@ -160,12 +170,39 @@ def _collect(
         )
 
 
-def _internal_weight(graph: igraph.Graph, group: list[int]) -> float:
-    members = set(group)
-    return float(
-        sum(
-            graph.es[index]["weight"]
-            for index in range(graph.ecount())
-            if graph.es[index].source in members and graph.es[index].target in members
+def _internal_weights(
+    graph: igraph.Graph,
+    groups: list[list[int]],
+) -> list[float]:
+    adjacency: list[list[tuple[int, float]]] = [[] for _ in range(graph.vcount())]
+    for edge in graph.es:
+        adjacency[edge.source].append((edge.target, edge["weight"]))
+
+    weights: list[float] = []
+    for group in groups:
+        members = set(group)
+        weights.append(
+            float(
+                sum(
+                    weight
+                    for source in group
+                    for target, weight in adjacency[source]
+                    if target in members
+                )
+            )
         )
-    )
+    return weights
+
+
+def _keep_sized_communities(
+    communities: list[Community],
+    min_members: int,
+) -> list[Community]:
+    parents = {
+        community.parent_id for community in communities if community.parent_id is not None
+    }
+    return [
+        community
+        for community in communities
+        if len(community.member_ids) >= min_members or community.community_id in parents
+    ]
