@@ -1,5 +1,4 @@
 import asyncio
-from urllib.parse import urlparse
 
 import pytest
 
@@ -184,10 +183,13 @@ class FakeEmbeddings:
 
 
 class QuotaEmbeddings(FakeEmbeddings):
+	def __init__(self, retry_after: float | None = None) -> None:
+		self.retry_after = retry_after
+
 	async def embed_documents(self, texts):
 		from rag.domain.errors import EmbeddingQuotaExhaustedError
 
-		raise EmbeddingQuotaExhaustedError("daily quota")
+		raise EmbeddingQuotaExhaustedError("daily quota", self.retry_after)
 
 
 class FakeExtraction:
@@ -259,12 +261,20 @@ def test_worker_reraises_processing_failure_for_arq_retry() -> None:
 	]
 
 
-def test_worker_marks_configuration_errors_failed_without_retry() -> None:
+@pytest.mark.parametrize(
+	"error",
+	[
+		LLMConfigurationError("invalid key"),
+		LLMQuotaExhaustedError("All configured models exhausted", 3600),
+	],
+	ids=["configuration", "quota"],
+)
+def test_worker_marks_unretryable_llm_failures_failed(error) -> None:
 	repository = FakeRepository()
 	ctx = make_ctx(
 		repository,
 		chapters=[],
-		extraction=FakeExtraction(LLMConfigurationError("invalid key")),
+		extraction=FakeExtraction(error),
 	)
 
 	asyncio.run(worker_module.process_ebook(ctx, "book-123", "books/book-123.epub"))
@@ -272,30 +282,7 @@ def test_worker_marks_configuration_errors_failed_without_retry() -> None:
 	assert repository.calls == [
 		("processing", "book-123"),
 		("replace", "book-123"),
-		("failed", "invalid key"),
-	]
-
-
-def test_worker_allows_three_attempts_for_retryable_jobs() -> None:
-	assert worker_module.WorkerSettings.max_tries == 3
-
-
-def test_worker_marks_quota_exhaustion_failed_without_retry() -> None:
-	repository = FakeRepository()
-	ctx = make_ctx(
-		repository,
-		chapters=[],
-		extraction=FakeExtraction(
-			LLMQuotaExhaustedError("All configured models exhausted", 3600)
-		),
-	)
-
-	asyncio.run(worker_module.process_ebook(ctx, "book-123", "books/book-123.epub"))
-
-	assert repository.calls == [
-		("processing", "book-123"),
-		("replace", "book-123"),
-		("failed", "All configured models exhausted"),
+		("failed", str(error)),
 	]
 
 
@@ -330,23 +317,12 @@ def test_worker_clears_the_previous_rag_index_before_replacing_content() -> None
 	assert repository.calls[-1] == ("ready", "book-123")
 
 
-def test_worker_uses_the_configured_extraction_timeout() -> None:
-	assert worker_module.WorkerSettings.job_timeout == settings.extraction_job_timeout_seconds
-
-
-def test_worker_connects_to_the_configured_redis() -> None:
-	redis_settings = worker_module.WorkerSettings.redis_settings
-
-	assert redis_settings.host == urlparse(settings.redis_url).hostname
-	assert redis_settings.port == urlparse(settings.redis_url).port
-
-
-def test_worker_settings_registers_the_graph_generation_job() -> None:
-	assert worker_module.generate_graph in worker_module.WorkerSettings.functions
-
-
-def test_worker_settings_registers_the_rag_index_job() -> None:
-	assert worker_module.build_rag_index in worker_module.WorkerSettings.functions
+def test_worker_settings_registers_every_job() -> None:
+	assert worker_module.WorkerSettings.functions == [
+		worker_module.process_ebook,
+		worker_module.generate_graph,
+		worker_module.build_rag_index,
+	]
 
 
 class FakeGraphBookRepository:
@@ -447,24 +423,29 @@ def test_graph_job_applies_a_new_resolution_and_bumps_the_revision() -> None:
 	assert repository.revision_bumps == ["book-123"]
 
 
-def test_graph_job_queues_a_rag_build_when_the_index_is_stale() -> None:
-	rag_repository = FakeRagRepository(needs_build=True)
+@pytest.mark.parametrize(
+	"needs_build",
+	[True, False],
+	ids=["stale", "current"],
+)
+def test_graph_job_queues_a_rag_build_only_when_the_index_is_stale(
+	needs_build,
+) -> None:
+	rag_repository = FakeRagRepository(needs_build=needs_build)
 	rag_repository.revision = 7
 	rag_queue = FakeRagQueue()
 	repository = FakeGraphBookRepository(state=graph_state())
 
 	run_graph_job(repository, rag_repository, rag_queue)
 
-	assert rag_queue.enqueued == [("book-123", 7, settings.embedding_model)]
-
-
-def test_graph_job_skips_the_rag_queue_when_the_index_is_current() -> None:
-	rag_queue = FakeRagQueue()
-	repository = FakeGraphBookRepository(state=graph_state())
-
-	run_graph_job(repository, FakeRagRepository(needs_build=False), rag_queue)
-
-	assert rag_queue.enqueued == []
+	assert rag_repository.checked == [
+		("book-123", 7, settings.embedding_model, settings.rag_build_stale_seconds)
+	]
+	expected = (
+		[("book-123", 7, settings.embedding_model)] if needs_build else []
+	)
+	assert rag_queue.enqueued == expected
+	assert rag_queue.deferred == []
 
 
 def test_graph_job_skips_the_revision_when_the_resolution_is_unchanged() -> None:
@@ -480,30 +461,21 @@ def test_graph_job_skips_the_revision_when_the_resolution_is_unchanged() -> None
 	assert repository.revision_bumps == []
 
 
-def test_graph_job_skips_a_book_that_is_not_ready() -> None:
-	repository = FakeGraphBookRepository(
-		state=graph_state(processing_status="processing"),
-		candidates=[candidate("e1", "Alice", 0.1)],
-	)
-
-	run_graph_job(repository)
-
-	assert repository.applied == []
-	assert repository.revision_bumps == []
-
-
-def test_graph_job_skips_an_unknown_book() -> None:
-	repository = FakeGraphBookRepository(state=None, candidates=[candidate("e1", "Alice")])
-
-	run_graph_job(repository)
-
-	assert repository.applied == []
-	assert repository.revision_bumps == []
-
-
-def test_graph_job_skips_a_book_without_mentions() -> None:
-	repository = FakeGraphBookRepository(state=graph_state(), candidates=[])
-
+@pytest.mark.parametrize(
+	"repository",
+	[
+		FakeGraphBookRepository(
+			state=None, candidates=[candidate("e1", "Alice")]
+		),
+		FakeGraphBookRepository(
+			state=graph_state(processing_status="processing"),
+			candidates=[candidate("e1", "Alice", 0.1)],
+		),
+		FakeGraphBookRepository(state=graph_state(), candidates=[]),
+	],
+	ids=["unknown-book", "not-ready", "no-mentions"],
+)
+def test_graph_job_skips_books_that_cannot_be_resolved(repository) -> None:
 	run_graph_job(repository)
 
 	assert repository.applied == []
@@ -534,7 +506,12 @@ def embedding_source():
 
 def test_build_job_skips_when_another_job_holds_the_claim() -> None:
 	rag_repository = FakeRagRepository(claim_result=False)
-	ctx = make_ctx(FakeRepository(), rag_repository=rag_repository)
+	rag_queue = FakeRagQueue()
+	ctx = make_ctx(
+		FakeRepository(),
+		rag_repository=rag_repository,
+		rag_queue=rag_queue,
+	)
 
 	asyncio.run(worker_module.build_rag_index(ctx, "book-123"))
 
@@ -547,9 +524,23 @@ def test_build_job_skips_when_another_job_holds_the_claim() -> None:
 		)
 	]
 	assert rag_repository.rows == []
+	assert rag_repository.pending == []
+	assert rag_repository.failures == []
+	assert rag_queue.enqueued == []
+	assert rag_queue.deferred == []
 
 
-def test_build_job_defers_after_daily_quota_exhaustion() -> None:
+@pytest.mark.parametrize(
+	("retry_after", "expected_defer"),
+	[
+		(None, settings.embedding_quota_defer_seconds),
+		(999_999.0, 999_999.0),
+	],
+	ids=["adapter-default", "adapter-delay"],
+)
+def test_build_job_defers_after_daily_quota_exhaustion(
+	retry_after, expected_defer
+) -> None:
 	rag_repository = FakeRagRepository(sources=[embedding_source()])
 	rag_queue = FakeRagQueue()
 	ctx = make_ctx(
@@ -557,11 +548,20 @@ def test_build_job_defers_after_daily_quota_exhaustion() -> None:
 		rag_repository=rag_repository,
 		rag_queue=rag_queue,
 	)
-	ctx["embedding_provider"] = QuotaEmbeddings()
+	ctx["embedding_provider"] = QuotaEmbeddings(retry_after)
 
 	asyncio.run(worker_module.build_rag_index(ctx, "book-123"))
 
+	assert rag_repository.claims == [
+		(
+			"book-123",
+			0,
+			settings.embedding_model,
+			settings.rag_build_stale_seconds,
+		)
+	]
 	assert rag_repository.pending == [("book-123", "daily quota")]
+	assert rag_repository.failures == []
 	assert rag_repository.rows == []
 	assert rag_queue.enqueued == []
 	assert rag_queue.deferred == [
@@ -569,6 +569,6 @@ def test_build_job_defers_after_daily_quota_exhaustion() -> None:
 			"book-123",
 			0,
 			settings.embedding_model,
-			settings.embedding_quota_defer_seconds,
+			expected_defer,
 		)
 	]

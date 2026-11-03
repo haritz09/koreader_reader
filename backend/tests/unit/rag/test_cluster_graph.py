@@ -5,9 +5,11 @@ import pytest
 from core.domain.entities.knowledge import EVENT_NODE_TYPE, LOCATION_NODE_TYPE
 from rag.clustering.graph import build_cluster_graph
 from rag.domain.clustering import (
+    ClusterEdge,
     ClusterEntityMention,
     ClusterFact,
     ClusterNamedMention,
+    ClusterNode,
     ClusterParameters,
     ClusterSources,
 )
@@ -143,7 +145,23 @@ def test_graph_output_is_deterministic() -> None:
     second = build_cluster_graph("book-1", sources, PARAMETERS)
 
     assert first == second
-    assert [node.node_id for node in first.nodes] == ["c1", "c2"]
+    assert first.nodes == (
+        ClusterNode(
+            node_id="c1",
+            node_type="character",
+            label="Alice",
+            reading_position=0.1,
+            mention_count=1,
+        ),
+        ClusterNode(
+            node_id="c2",
+            node_type="character",
+            label="Bob",
+            reading_position=0.2,
+            mention_count=1,
+        ),
+    )
+    assert first.edges == (ClusterEdge(source_id="c1", target_id="c2", weight=3.0),)
 
 
 def test_chunk_truncation_keeps_the_most_mentioned_nodes() -> None:
@@ -172,5 +190,12 @@ def test_chunk_truncation_keeps_the_most_mentioned_nodes() -> None:
 
     graph = build_cluster_graph("book-1", sources, parameters)
 
-    assert edge_weight(graph, "c2", "c3") == pytest.approx(1.0)
+    assert {node.node_id: node.mention_count for node in graph.nodes} == {
+        "c1": 1,
+        "c2": 3,
+        "c3": 2,
+    }
+    assert graph.edges == (
+        ClusterEdge(source_id="c2", target_id="c3", weight=1.0),
+    )
     assert all("c1" not in {edge.source_id, edge.target_id} for edge in graph.edges)

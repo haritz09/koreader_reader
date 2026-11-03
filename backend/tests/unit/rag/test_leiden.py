@@ -88,6 +88,14 @@ def test_detection_is_reproducible() -> None:
     second = LeidenCommunityDetector().detect(graph, PARAMETERS)
 
     assert first == second
+    assert first.node_count == 5
+    assert first.edge_count == 4
+    assert first.parameters["unclustered_nodes"] == 0
+    assert sorted(
+        tuple(sorted(community.member_ids))
+        for community in first.communities
+        if community.level == 0
+    ) == [("a0", "a1", "a2"), ("b0", "b1")]
 
 
 def test_isolated_nodes_do_not_become_singleton_communities() -> None:
@@ -110,9 +118,15 @@ def test_isolated_nodes_do_not_become_singleton_communities() -> None:
 
     tree = LeidenCommunityDetector().detect(graph, PARAMETERS)
 
-    assert tree.communities
+    roots = [community for community in tree.communities if community.level == 0]
+    assert len(roots) == 1
+    assert roots[0].member_ids == ("a0", "a1", "a2", "a3")
+    assert tree.node_count == 5
     assert all(len(community.member_ids) >= 2 for community in tree.communities)
     assert tree.parameters["unclustered_nodes"] == 1
+    assert "lonely" not in {
+        node_id for community in tree.communities for node_id in community.member_ids
+    }
 
 
 def test_max_levels_counts_total_levels(monkeypatch) -> None:
@@ -152,6 +166,13 @@ def test_max_levels_counts_total_levels(monkeypatch) -> None:
             cooccurrence_edge_weight=1.0,
         )
         tree = LeidenCommunityDetector().detect(graph, parameters)
+        assert tree.parameters["unclustered_nodes"] == 0
+        assert all(
+            child.level == parent.level + 1
+            for child in tree.communities
+            for parent in tree.communities
+            if child.parent_id == parent.community_id
+        )
         return {community.level for community in tree.communities}
 
     assert levels(3) == {0, 1, 2}

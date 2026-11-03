@@ -3,6 +3,7 @@
 import asyncio
 import json
 import math
+from collections.abc import Callable
 
 import httpx
 import pytest
@@ -49,6 +50,9 @@ def test_batch_request_shape_and_normalization() -> None:
         "first",
         "second",
     ]
+    assert {request["model"] for request in requests} == {
+        "models/gemini-embedding-001"
+    }
     assert {request["taskType"] for request in requests} == {"RETRIEVAL_DOCUMENT"}
     assert {request["outputDimensionality"] for request in requests} == {3}
     assert vectors == [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
@@ -58,18 +62,10 @@ def test_batch_request_shape_and_normalization() -> None:
     )
 
 
-def test_missing_api_key_is_a_configuration_error() -> None:
-    provider = GeminiEmbeddingProvider(api_key="", model="gemini-embedding-001")
-
-    with pytest.raises(EmbeddingConfigurationError):
-        asyncio.run(provider.embed_documents(["text"]))
-
-
-def test_server_errors_are_transient() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(503, text="unavailable")
-
-    async def run():
+def run_against(
+    handler: Callable[[httpx.Request], httpx.Response],
+) -> None:
+    async def run() -> None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             provider = GeminiEmbeddingProvider(
                 api_key="secret",
@@ -79,14 +75,42 @@ def test_server_errors_are_transient() -> None:
             )
             await provider.embed_documents(["text"])
 
-    with pytest.raises(EmbeddingTransientError):
+    asyncio.run(run())
+
+
+def test_missing_api_key_is_a_configuration_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("request must not be sent without an API key")
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = GeminiEmbeddingProvider(
+                api_key="", model="gemini-embedding-001", client=client
+            )
+            await provider.embed_documents(["text"])
+
+    with pytest.raises(
+        EmbeddingConfigurationError, match="Embedding API key is not configured"
+    ):
         asyncio.run(run())
+
+
+def test_server_errors_are_transient() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            503, headers={"Retry-After": "7"}, text="unavailable"
+        )
+
+    with pytest.raises(EmbeddingTransientError, match="failed \\(503\\)") as raised:
+        run_against(handler)
+    assert raised.value.retry_after == 7.0
 
 
 def test_daily_quota_failure_is_not_transient() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             429,
+            headers={"Retry-After": "21600"},
             json={
                 "error": {
                     "code": 429,
@@ -107,34 +131,17 @@ def test_daily_quota_failure_is_not_transient() -> None:
             },
         )
 
-    async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            provider = GeminiEmbeddingProvider(
-                api_key="secret",
-                model="gemini-embedding-001",
-                dimensions=3,
-                client=client,
-            )
-            await provider.embed_documents(["text"])
-
-    with pytest.raises(EmbeddingQuotaExhaustedError):
-        asyncio.run(run())
+    with pytest.raises(
+        EmbeddingQuotaExhaustedError, match="daily quota exhausted"
+    ) as raised:
+        run_against(handler)
+    assert raised.value.retry_after == 21600.0
 
 
 def test_per_minute_rate_limit_stays_transient() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(429, headers={"Retry-After": "5"}, text="rate limited")
 
-    async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            provider = GeminiEmbeddingProvider(
-                api_key="secret",
-                model="gemini-embedding-001",
-                dimensions=3,
-                client=client,
-            )
-            await provider.embed_documents(["text"])
-
-    with pytest.raises(EmbeddingTransientError) as raised:
-        asyncio.run(run())
+    with pytest.raises(EmbeddingTransientError, match="rate limit hit") as raised:
+        run_against(handler)
     assert raised.value.retry_after == 5.0

@@ -1,6 +1,7 @@
 """Incremental embedding generation and retry behavior."""
 
 import asyncio
+import math
 
 import pytest
 
@@ -38,16 +39,24 @@ class FakeProvider:
     dimensions = 2
     max_batch_size = 2
 
-    def __init__(self, failures: int = 0, quota_failures: int = 0) -> None:
+    def __init__(
+        self,
+        failures: int = 0,
+        quota_failures: int = 0,
+        quota_retry_after: float | None = None,
+    ) -> None:
         self.failures = failures
         self.quota_failures = quota_failures
+        self.quota_retry_after = quota_retry_after
         self.calls: list[list[str]] = []
 
     async def embed_documents(self, texts):
         self.calls.append(list(texts))
         if self.quota_failures:
             self.quota_failures -= 1
-            raise EmbeddingQuotaExhaustedError("daily quota")
+            raise EmbeddingQuotaExhaustedError(
+                "daily quota", self.quota_retry_after
+            )
         if self.failures:
             self.failures -= 1
             raise EmbeddingTransientError("temporary")
@@ -93,8 +102,20 @@ def test_only_new_or_changed_sources_are_embedded() -> None:
     assert summary.total == 3
     assert summary.embedded == 2
     assert summary.reused == 1
+    assert summary.skipped == 0
     assert provider.calls == [["new fact", "new entity"]]
-    assert {row[0].source_id for row in repository.rows} == {"f1", "e1"}
+    assert repository.rows == [
+        (
+            repository.sources[1],
+            content_hash("new fact"),
+            [1.0, 0.0],
+        ),
+        (
+            repository.sources[2],
+            content_hash("new entity"),
+            [1.0, 0.0],
+        ),
+    ]
 
 
 def test_transient_failure_is_retried() -> None:
@@ -103,14 +124,32 @@ def test_transient_failure_is_retried() -> None:
 
     summary = asyncio.run(service(repository, provider).embed_book("book-1"))
 
+    assert summary.total == 1
     assert summary.embedded == 1
-    assert len(provider.calls) == 2
+    assert summary.reused == 0
+    assert summary.skipped == 0
+    assert provider.calls == [["text"], ["text"]]
+    assert repository.rows == [
+        (repository.sources[0], content_hash("text"), [1.0, 0.0])
+    ]
 
 
-def test_invalid_vector_count_raises() -> None:
+@pytest.mark.parametrize(
+    ("vectors", "message"),
+    [
+        ([[1.0, 0.0]], "incomplete batch of 1"),
+        ([[1.0, 0.0], [1.0]], "invalid vector"),
+        ([[1.0, 0.0], [math.inf, 0.0]], "non-finite vector"),
+    ],
+    ids=["count", "dimension", "non-finite"],
+)
+def test_invalid_provider_vectors_fail_without_writing_rows(
+    vectors, message
+) -> None:
     class BrokenProvider(FakeProvider):
         async def embed_documents(self, texts):
-            return [[1.0, 0.0]]
+            self.calls.append(list(texts))
+            return vectors
 
     repository = FakeRepository(
         [
@@ -118,11 +157,15 @@ def test_invalid_vector_count_raises() -> None:
             source(EmbeddingSourceType.CHUNK, "c2", "two"),
         ]
     )
+    provider = BrokenProvider()
 
-    with pytest.raises(EmbeddingError, match="incomplete batch"):
+    with pytest.raises(EmbeddingError, match=message):
         asyncio.run(
-            service(repository, BrokenProvider(), max_attempts=1).embed_book("book-1")
+            service(repository, provider, max_attempts=1).embed_book("book-1")
         )
+
+    assert provider.calls == [["one", "two"]]
+    assert repository.rows == []
 
 
 def test_identical_texts_are_embedded_once() -> None:
@@ -138,13 +181,20 @@ def test_identical_texts_are_embedded_once() -> None:
     summary = asyncio.run(service(repository, provider).embed_book("book-1"))
 
     assert provider.calls == [["Alice (character)", "Alice meets Bob"]]
+    assert summary.total == 3
     assert summary.embedded == 3
+    assert summary.reused == 0
+    assert summary.skipped == 0
     assert len(repository.rows) == 3
     alice_vectors = {
         tuple(row[2]) for row in repository.rows if row[0].source_id in {"e1", "e2"}
     }
-    assert len(alice_vectors) == 1
-    assert {row[0].source_id for row in repository.rows} == {"e1", "e2", "f1"}
+    assert alice_vectors == {(1.0, 0.0)}
+    assert [row[0].source_id for row in repository.rows] == ["e1", "e2", "f1"]
+    assert {row[1] for row in repository.rows} == {
+        content_hash("Alice (character)"),
+        content_hash("Alice meets Bob"),
+    }
 
 
 def test_blank_texts_are_not_sent_to_the_provider() -> None:
@@ -159,21 +209,28 @@ def test_blank_texts_are_not_sent_to_the_provider() -> None:
     summary = asyncio.run(service(repository, provider).embed_book("book-1"))
 
     assert provider.calls == [["Alice meets Bob"]]
+    assert summary.total == 2
     assert summary.embedded == 1
+    assert summary.reused == 0
     assert summary.skipped == 1
-    assert [row[0].source_id for row in repository.rows] == ["f1"]
+    assert repository.rows == [
+        (repository.sources[1], content_hash("Alice meets Bob"), [1.0, 0.0])
+    ]
 
 
 def test_daily_quota_is_not_retried() -> None:
     repository = FakeRepository([source(EmbeddingSourceType.CHUNK, "c1", "text")])
-    provider = FakeProvider(quota_failures=5)
+    provider = FakeProvider(quota_failures=5, quota_retry_after=21600)
 
-    with pytest.raises(EmbeddingQuotaExhaustedError):
+    with pytest.raises(EmbeddingQuotaExhaustedError) as raised:
         asyncio.run(
             service(repository, provider, max_attempts=3).embed_book("book-1")
         )
 
-    assert len(provider.calls) == 1
+    assert str(raised.value) == "daily quota"
+    assert raised.value.retry_after == 21600
+    assert provider.calls == [["text"]]
+    assert repository.rows == []
 
 
 def test_batch_size_is_capped_by_the_provider() -> None:
@@ -188,6 +245,10 @@ def test_batch_size_is_capped_by_the_provider() -> None:
     )
     provider = SingleTextProvider()
 
-    asyncio.run(service(repository, provider, batch_size=100).embed_book("book-1"))
+    summary = asyncio.run(
+        service(repository, provider, batch_size=100).embed_book("book-1")
+    )
 
     assert provider.calls == [["one"], ["two"]]
+    assert summary.embedded == 2
+    assert [row[0].source_id for row in repository.rows] == ["c1", "c2"]

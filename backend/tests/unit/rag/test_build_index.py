@@ -68,53 +68,52 @@ def test_build_is_skipped_when_another_job_holds_the_claim() -> None:
     assert result is None
     assert embeddings.called is False
     assert repository.claims == [("book-1", 3, "test-embedding", 7200)]
+    assert repository.pending == []
+    assert repository.failed == []
 
 
 def test_daily_quota_marks_pending_and_defers() -> None:
     repository = FakeRepository()
-    error = EmbeddingQuotaExhaustedError("daily quota", 21600)
+    embeddings = FakeEmbeddings(
+        EmbeddingQuotaExhaustedError("daily quota", 21600)
+    )
 
     with pytest.raises(RagBuildDeferred) as raised:
-        asyncio.run(use_case(repository, FakeEmbeddings(error)).execute("book-1", 3))
+        asyncio.run(use_case(repository, embeddings).execute("book-1", 3))
 
     assert raised.value.retry_after == 21600
+    assert embeddings.called is True
     assert repository.pending == [("book-1", "daily quota")]
     assert repository.failed == []
 
 
-def test_permanent_failure_marks_failed_without_retry() -> None:
+@pytest.mark.parametrize(
+    "error",
+    [
+        EmbeddingPermanentError("invalid input"),
+        EmbeddingConfigurationError("missing key"),
+    ],
+    ids=["permanent", "configuration"],
+)
+def test_non_retryable_failures_mark_failed_without_retry(error) -> None:
     repository = FakeRepository()
-    error = EmbeddingPermanentError("invalid input")
+    embeddings = FakeEmbeddings(error)
 
-    result = asyncio.run(use_case(repository, FakeEmbeddings(error)).execute("book-1", 3))
+    result = asyncio.run(use_case(repository, embeddings).execute("book-1", 3))
 
     assert result is None
-    assert repository.failed == [("book-1", "invalid input")]
+    assert embeddings.called is True
+    assert repository.failed == [("book-1", str(error))]
     assert repository.pending == []
-
-
-def test_configuration_failure_marks_failed_without_retry() -> None:
-    repository = FakeRepository()
-
-    asyncio.run(
-        use_case(
-            repository,
-            FakeEmbeddings(EmbeddingConfigurationError("missing key")),
-        ).execute("book-1", 3)
-    )
-
-    assert repository.failed == [("book-1", "missing key")]
 
 
 def test_transient_failure_is_reraised_for_arq() -> None:
     repository = FakeRepository()
+    embeddings = FakeEmbeddings(EmbeddingTransientError("temporary"))
 
     with pytest.raises(EmbeddingTransientError, match="temporary"):
-        asyncio.run(
-            use_case(
-                repository,
-                FakeEmbeddings(EmbeddingTransientError("temporary")),
-            ).execute("book-1", 3)
-        )
+        asyncio.run(use_case(repository, embeddings).execute("book-1", 3))
 
+    assert embeddings.called is True
     assert repository.failed == [("book-1", "temporary")]
+    assert repository.pending == []
