@@ -156,3 +156,42 @@ def test_max_levels_counts_total_levels(monkeypatch) -> None:
 
     assert levels(3) == {0, 1, 2}
     assert levels(2) == {0, 1}
+
+
+def test_singletons_are_dropped_at_every_level(monkeypatch) -> None:
+    import rag.clustering.leiden as leiden_module
+
+    calls = {"count": 0}
+
+    def fake_partition(graph, parameters):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return [[0, 1, 2, 3]]
+        return [[0, 1], [2], [3]]
+
+    monkeypatch.setattr(leiden_module, "_partition", fake_partition)
+
+    graph = ClusterGraph(
+        book_id="book-1",
+        nodes=tuple(complete_graph("a", [0.0, 0.1, 0.2, 0.3])),
+        edges=tuple(complete_edges("a", 4)),
+    )
+    parameters = ClusterParameters(
+        resolution=1.0,
+        max_levels=2,
+        min_size=1,
+        seed=42,
+        objective="cpm",
+        fact_edge_weight=2.0,
+        cooccurrence_edge_weight=1.0,
+    )
+
+    tree = LeidenCommunityDetector().detect(graph, parameters)
+
+    by_level = {community.level: community for community in tree.communities}
+    assert set(by_level) == {0, 1}
+    assert by_level[0].member_ids == ("a0", "a1", "a2", "a3")
+    assert by_level[1].member_ids == ("a0", "a1")
+    assert by_level[1].parent_id == by_level[0].community_id
+    assert all(len(community.member_ids) >= 2 for community in tree.communities)
+    assert tree.parameters["unclustered_nodes"] == 0
