@@ -15,8 +15,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
-
-READING_POSITION_CHECK = "reading_position >= 0.0 AND reading_position <= 1.0"
+from db.constraints import READING_POSITION_CHECK
 
 ENTITY_TYPE_VALUES = "'character', 'enemy', 'artifact', 'organization', 'concept', 'other'"
 ENTITY_TYPE_CHECK = f"entity_type IN ({ENTITY_TYPE_VALUES})"
