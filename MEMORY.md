@@ -86,6 +86,7 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 
 - `ReadingPosition` is the single definition of a valid position: finite and within `[0.0, 1.0]`. Repository queries validate through it before building SQL.
 - Database `CHECK` constraints enforce the same range for `entities`, `facts`, `events`, `locations`, and `user_books.progress_position`.
+- Shared `CheckConstraint` expressions live once in `backend/db/constraints.py`; Alembic migrations keep their own frozen copies because they are historical snapshots.
 - The anti-spoiler filter is `reading_position <= current_position`. It applies to graph reads and knowledge retrieval.
 - `PostgresKnowledgeRepository.get_entity_candidates` is the intentional exception: identity resolution needs all mentions because the stored mapping contains no text.
 
