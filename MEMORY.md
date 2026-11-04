@@ -60,6 +60,9 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 - Embedding texts are deduplicated by content hash and blank texts are skipped before the provider call. Batch size is capped by `EmbeddingProvider.max_batch_size`; the Gemini adapter allows 100 texts per request.
 - Hierarchical communities drop leaves smaller than `COMMUNITY_MIN_MEMBERS` (default 2) at every level. A community with children is never dropped, because its children still point to it. The run parameters record `unclustered_nodes` so oversized orphan sets are visible.
 - `rag_community_members` stores each node's `first_seen_position`, so a future read path can filter members by reading position without joining the knowledge tables.
+- Retrieval embeds the question with `RETRIEVAL_QUERY`; stored vectors use `RETRIEVAL_DOCUMENT`. The two task types are not interchangeable.
+- `PostgresRetrievalRepository` applies `reading_position <= position` in SQL before ranking, keeps one row per `chunk_id` with the best distance, and skips rows without a chunk because they cannot be cited. `RetrieveContextUseCase` re-filters the returned set as defense in depth.
+- Weak matches are returned with their distance instead of being discarded. Deciding whether the evidence can answer a question belongs to the chat layer, not to retrieval.
 - Reprocessing a book deletes its RAG index before `replace_derived_content`.
 - `build_rag_index` is a separate ARQ job queued by `generate_graph`. The graph job remains non-fatal; queueing failures are logged. `BuildRagIndexUseCase` records permanent failures without re-raising, marks quota exhaustion `pending` and defers, and re-raises transient failures so ARQ retries.
 - Postgres uses the `pgvector/pgvector:pg16` image in Compose and CI; the migration creates the `vector` extension.

@@ -62,6 +62,36 @@ def test_batch_request_shape_and_normalization() -> None:
     )
 
 
+def test_query_embedding_uses_the_retrieval_query_task_type() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"embeddings": [{"values": [3.0, 0.0, 0.0]}]},
+        )
+
+    async def run() -> list[float]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = GeminiEmbeddingProvider(
+                api_key="secret",
+                model="gemini-embedding-001",
+                base_url="https://example.test/v1beta",
+                dimensions=3,
+                client=client,
+            )
+            return await provider.embed_query("who betrayed Jon")
+
+    vector = asyncio.run(run())
+
+    requests = captured["body"]["requests"]
+    assert len(requests) == 1
+    assert requests[0]["taskType"] == "RETRIEVAL_QUERY"
+    assert requests[0]["content"]["parts"][0]["text"] == "who betrayed Jon"
+    assert vector == [1.0, 0.0, 0.0]
+
+
 def run_against(
     handler: Callable[[httpx.Request], httpx.Response],
 ) -> None:

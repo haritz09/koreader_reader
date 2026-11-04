@@ -49,6 +49,17 @@ class GeminiEmbeddingProvider:
         return MAX_BATCH_SIZE
 
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        return await self._embed(texts, "RETRIEVAL_DOCUMENT")
+
+    async def embed_query(self, text: str) -> list[float]:
+        vectors = await self._embed([text], "RETRIEVAL_QUERY")
+        return vectors[0]
+
+    async def _embed(
+        self,
+        texts: Sequence[str],
+        task_type: str,
+    ) -> list[list[float]]:
         if not texts:
             return []
         if not self._api_key:
@@ -59,7 +70,7 @@ class GeminiEmbeddingProvider:
                 {
                     "model": f"models/{self._model}",
                     "content": {"parts": [{"text": text}]},
-                    "taskType": "RETRIEVAL_DOCUMENT",
+                    "taskType": task_type,
                     "outputDimensionality": self._dimensions,
                 }
                 for text in texts

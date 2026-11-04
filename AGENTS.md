@@ -35,6 +35,7 @@ These instructions apply to the entire repository. Read the relevant skill befor
 6. Do not write comments when making changes.
 7. Write and audit every change with the `ponytail` skill.
 8. A failing lint, type check, or test blocks completion; never leave it for the next change.
+9. Commit and push only when asked to. Propose the commit message and let the user commit else.
 
 Tests must be behavior-first: derive cases from the feature's public contract and realistic failure modes, not from the current implementation structure. Do not add tests merely to mirror private methods or make coverage numbers increase.
 
