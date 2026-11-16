@@ -7,8 +7,8 @@ from api.dependencies import (
 	get_koreader_progress_adapter,
 	get_library_repository,
 )
-from core.domain.entities.library import ReadingState
 from main import app
+from tests.fixtures.repositories import FakeLibraryRepository, reading_state
 
 
 class RecordingGraphQueue:
@@ -17,38 +17,6 @@ class RecordingGraphQueue:
 
     async def enqueue(self, book_id: str) -> None:
         self.enqueued.append(book_id)
-
-
-class InMemoryLibraryRepository:
-    def __init__(
-        self,
-        book_ids: set[str],
-        progress_position: float = 0.0,
-        graph_revision: int = 0,
-    ) -> None:
-        self._book_ids = book_ids
-        self._progress_position = progress_position
-        self._graph_revision = graph_revision
-
-    async def get_reading_state(
-        self, owner_id: str, book_id: str
-    ) -> ReadingState | None:
-        if book_id not in self._book_ids:
-            return None
-        return ReadingState(
-            progress_position=self._progress_position,
-            last_synced_at=None,
-            processing_status="ready",
-            graph_revision=self._graph_revision,
-        )
-
-    async def update_progress(
-        self, owner_id: str, book_id: str, position: float, synced_at
-    ) -> bool:
-        if book_id not in self._book_ids:
-            return False
-        self._progress_position = position
-        return True
 
 
 class InMemoryBookRepository:
@@ -65,8 +33,12 @@ def client_for_books(books: dict[str, str], **kwargs) -> TestClient:
     app.dependency_overrides[get_koreader_progress_adapter] = lambda: (
         KoreaderProgressAdapter(repository)
     )
-    app.dependency_overrides[get_library_repository] = lambda: (
-        InMemoryLibraryRepository(set(books.values()), **kwargs)
+    app.dependency_overrides[get_library_repository] = lambda: FakeLibraryRepository(
+        reading_state(
+            kwargs.get("progress_position", 0.0),
+            graph_revision=kwargs.get("graph_revision", 0),
+        ),
+        known_book_ids=set(books.values()),
     )
     app.dependency_overrides[get_graph_generation_queue] = lambda: RecordingGraphQueue()
     return TestClient(app)

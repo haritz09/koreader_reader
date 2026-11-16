@@ -1,7 +1,5 @@
 """Removing a book end to end against the full Compose stack."""
 
-import time
-
 import pytest
 
 from tests.fixtures.epub import valid_epub_bytes
@@ -14,31 +12,19 @@ def _upload(client, content: bytes):
     )
 
 
-def _wait_for_ready(client, book_id: str, timeout: float = 30) -> dict:
-    deadline = time.monotonic() + timeout
-    status = None
-    while time.monotonic() < deadline:
-        response = client.get(f"/api/v1/ebooks/{book_id}")
-        assert response.status_code == 200
-        status = response.json()
-        if status["processing_status"] in {"ready", "failed"}:
-            return status
-        time.sleep(0.25)
-    raise AssertionError(f"book never finished processing: {status}")
-
-
 @pytest.mark.e2e
 def test_deleting_a_book_hides_it_and_reuploading_restores_the_same_book(
     e2e_enabled,
     clean_postgres_database,
     postgres_connection,
     e2e_client,
+    wait_for_ready,
 ) -> None:
     content = valid_epub_bytes()
     upload = _upload(e2e_client, content)
     assert upload.status_code == 202
     book_id = upload.json()["book_id"]
-    assert _wait_for_ready(e2e_client, book_id)["processing_status"] == "ready"
+    assert wait_for_ready(book_id)["processing_status"] == "ready"
 
     deleted = e2e_client.delete(f"/api/v1/ebooks/{book_id}")
     assert deleted.status_code == 204

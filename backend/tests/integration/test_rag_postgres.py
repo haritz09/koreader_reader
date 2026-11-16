@@ -1,7 +1,6 @@
 """RAG persistence against a real PostgreSQL database."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -12,7 +11,7 @@ from db.models.book import Book
 from db.models.chapter import ChapterRecord
 from db.models.chunk import ChunkRecord
 from db.models.knowledge import EntityRecord, EventRecord, FactRecord, LocationRecord
-from db.session import engine, session_factory
+from db.session import session_factory
 from rag.adapters.persistence.models import (
     RagCommunityMemberRecord,
     RagCommunityRecord,
@@ -26,6 +25,7 @@ from rag.clustering.leiden import LeidenCommunityDetector
 from rag.domain.clustering import ClusterParameters
 from rag.domain.embeddings import EmbeddingSource, EmbeddingSourceType
 from rag.domain.status import RagIndexStatus
+from tests.fixtures.postgres import run_against_postgres
 
 pytestmark = pytest.mark.postgres
 
@@ -39,17 +39,6 @@ PARAMETERS = ClusterParameters(
     fact_edge_weight=2.0,
     cooccurrence_edge_weight=1.0,
 )
-
-
-def run_against_postgres(work: Callable[[AsyncSession], Awaitable[None]]) -> None:
-    async def main() -> None:
-        try:
-            async with session_factory() as session:
-                await work(session)
-        finally:
-            await engine.dispose()
-
-    asyncio.run(main())
 
 
 def seed_book() -> None:

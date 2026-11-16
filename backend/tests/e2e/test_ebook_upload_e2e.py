@@ -1,5 +1,3 @@
-import time
-
 import pytest
 
 from tests.fixtures.epub import valid_epub_bytes
@@ -11,6 +9,7 @@ def test_upload_is_processed_by_compose_worker(
     clean_postgres_database,
     postgres_connection,
     e2e_client,
+    wait_for_ready,
 ) -> None:
     content = valid_epub_bytes()
 
@@ -21,17 +20,7 @@ def test_upload_is_processed_by_compose_worker(
     assert response.status_code == 202
     upload = response.json()
 
-    deadline = time.monotonic() + 30
-    status = None
-    while time.monotonic() < deadline:
-        status_response = e2e_client.get(f"/api/v1/ebooks/{upload['book_id']}")
-        assert status_response.status_code == 200
-        status = status_response.json()
-        if status["processing_status"] in {"ready", "failed"}:
-            break
-        time.sleep(0.25)
-
-    assert status is not None
+    status = wait_for_ready(upload["book_id"])
     assert status["processing_status"] == "ready", status
 
     row = postgres_connection.execute(

@@ -4,24 +4,9 @@ Knowledge is inserted directly so the spoiler assertion is meaningful even
 when no LLM key is configured, which is the default in Compose.
 """
 
-import time
-
 import pytest
 
 from tests.fixtures.epub import valid_epub_bytes
-
-
-def _wait_for_ready(e2e_client, book_id: str, timeout: float = 30) -> dict:
-    deadline = time.monotonic() + timeout
-    status = None
-    while time.monotonic() < deadline:
-        response = e2e_client.get(f"/api/v1/ebooks/{book_id}")
-        assert response.status_code == 200
-        status = response.json()
-        if status["processing_status"] in {"ready", "failed"}:
-            return status
-        time.sleep(0.25)
-    raise AssertionError(f"book never finished processing: {status}")
 
 
 def _seed_knowledge(postgres_connection, book_id: str) -> None:
@@ -60,6 +45,7 @@ def test_graph_reflects_synced_progress_without_leaking_later_knowledge(
     clean_postgres_database,
     postgres_connection,
     e2e_client,
+    wait_for_ready,
 ) -> None:
     content = valid_epub_bytes()
     response = e2e_client.post(
@@ -70,7 +56,7 @@ def test_graph_reflects_synced_progress_without_leaking_later_knowledge(
     book_id = response.json()["book_id"]
     document_hash = response.json()["document_hash"]
 
-    status = _wait_for_ready(e2e_client, book_id)
+    status = wait_for_ready(book_id)
     assert status["processing_status"] == "ready", status
     _seed_knowledge(postgres_connection, book_id)
 
@@ -103,6 +89,7 @@ def test_graph_grows_when_the_reader_advances(
     clean_postgres_database,
     postgres_connection,
     e2e_client,
+    wait_for_ready,
 ) -> None:
     response = e2e_client.post(
         "/api/v1/ebooks",
@@ -112,7 +99,7 @@ def test_graph_grows_when_the_reader_advances(
     book_id = response.json()["book_id"]
     document_hash = response.json()["document_hash"]
 
-    assert _wait_for_ready(e2e_client, book_id)["processing_status"] == "ready"
+    assert wait_for_ready(book_id)["processing_status"] == "ready"
     _seed_knowledge(postgres_connection, book_id)
 
     e2e_client.post(
@@ -138,6 +125,7 @@ def test_partial_book_keeps_its_position_filtered_graph_available(
     clean_postgres_database,
     postgres_connection,
     e2e_client,
+    wait_for_ready,
 ) -> None:
     response = e2e_client.post(
         "/api/v1/ebooks",
@@ -147,7 +135,7 @@ def test_partial_book_keeps_its_position_filtered_graph_available(
     book_id = response.json()["book_id"]
     document_hash = response.json()["document_hash"]
 
-    assert _wait_for_ready(e2e_client, book_id)["processing_status"] == "ready"
+    assert wait_for_ready(book_id)["processing_status"] == "ready"
     postgres_connection.execute(
         "UPDATE books SET processing_status = 'partial' WHERE id = %s",
         (book_id,),
@@ -181,6 +169,7 @@ def test_rewinding_shrinks_the_graph(
     clean_postgres_database,
     postgres_connection,
     e2e_client,
+    wait_for_ready,
 ) -> None:
     response = e2e_client.post(
         "/api/v1/ebooks",
@@ -190,7 +179,7 @@ def test_rewinding_shrinks_the_graph(
     book_id = response.json()["book_id"]
     document_hash = response.json()["document_hash"]
 
-    assert _wait_for_ready(e2e_client, book_id)["processing_status"] == "ready"
+    assert wait_for_ready(book_id)["processing_status"] == "ready"
     _seed_knowledge(postgres_connection, book_id)
 
     def sync_to(position: float) -> dict:

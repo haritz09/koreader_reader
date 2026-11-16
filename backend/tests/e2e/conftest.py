@@ -1,5 +1,6 @@
 import os
-from collections.abc import Generator
+import time
+from collections.abc import Callable, Generator
 
 import httpx
 import pytest
@@ -23,3 +24,20 @@ def e2e_client(
         session_response = client.post("/api/v1/session")
         assert session_response.status_code == 201, session_response.text
         yield client
+
+
+@pytest.fixture
+def wait_for_ready(e2e_client: httpx.Client) -> Callable[..., dict]:
+    def wait(book_id: str, timeout: float = 30) -> dict:
+        deadline = time.monotonic() + timeout
+        status = None
+        while time.monotonic() < deadline:
+            response = e2e_client.get(f"/api/v1/ebooks/{book_id}")
+            assert response.status_code == 200
+            status = response.json()
+            if status["processing_status"] in {"ready", "failed"}:
+                return status
+            time.sleep(0.25)
+        raise AssertionError(f"book never finished processing: {status}")
+
+    return wait
