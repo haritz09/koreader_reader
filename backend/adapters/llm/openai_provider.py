@@ -27,6 +27,8 @@ from core.ports.llm_provider import (
     LLMTransientError,
 )
 from lib.http_quota import classify_quota, parse_retry_after
+from rag.domain.chat import AnswerDraft
+from rag.domain.retrieval import RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +103,19 @@ Return ONLY valid JSON of the form {"groups": [["id1", "id2"], ["id3"]]} where \
 every input id appears in exactly one group.\
 """
 
+_ANSWER_PROMPT = """\
+You answer questions about a book using ONLY the numbered excerpts the reader \
+has already passed. Never use outside knowledge and never use information the \
+reader has not reached.
+
+Each excerpt is labelled with its chunk_id. Cite every excerpt you rely on and \
+nothing else.
+
+Return ONLY valid JSON of the form {"answer": "...", "citations": ["chunk_id"]}. \
+When the excerpts do not answer the question, say so in "answer" and return an \
+empty "citations" array.\
+"""
+
 
 class OpenAIProvider:
     def __init__(
@@ -160,6 +175,26 @@ class OpenAIProvider:
             0.0,
         )
         return self._parse_resolution(content)
+
+    async def answer(
+        self,
+        question: str,
+        chunks: Sequence[RetrievedChunk],
+    ) -> AnswerDraft:
+        listing = "\n\n".join(
+            f"[chunk_id={chunk.chunk_id}]\n{chunk.text}" for chunk in chunks
+        )
+        content = await self._post_chat(
+            [
+                {"role": "system", "content": _ANSWER_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"Question: {question}\n\nExcerpts:\n{listing}",
+                },
+            ],
+            0.2,
+        )
+        return self._parse_answer(content)
 
     async def _post_chat(
         self,
@@ -242,6 +277,29 @@ class OpenAIProvider:
             for group in groups
             if isinstance(group, list)
         ]
+
+    @staticmethod
+    def _parse_answer(content: str) -> AnswerDraft:
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as error:
+            raise LLMTransientError("LLM returned invalid JSON") from error
+        if not isinstance(data, dict):
+            raise LLMTransientError("LLM returned a non-object JSON payload")
+
+        answer = data.get("answer")
+        citations = data.get("citations")
+        if not isinstance(answer, str) or not answer.strip():
+            raise LLMTransientError("LLM returned an empty answer")
+        if not isinstance(citations, list):
+            raise LLMTransientError("LLM returned an invalid answer")
+
+        return AnswerDraft(
+            text=answer,
+            cited_chunk_ids=tuple(
+                citation for citation in citations if isinstance(citation, str)
+            ),
+        )
 
     @staticmethod
     def _parse_response(content: str) -> KnowledgeExtractionResult:

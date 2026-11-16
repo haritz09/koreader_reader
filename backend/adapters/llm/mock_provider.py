@@ -2,6 +2,8 @@ from collections.abc import Sequence
 
 from core.domain.entities.graph import EntityCandidate
 from core.domain.entities.knowledge import KnowledgeExtractionResult
+from rag.domain.chat import AnswerDraft
+from rag.domain.retrieval import RetrievedChunk
 
 
 class MockLLMProvider:
@@ -19,6 +21,16 @@ class MockLLMProvider:
         candidates: Sequence[EntityCandidate],
     ) -> list[list[str]]:
         return []
+
+    async def answer(
+        self,
+        question: str,
+        chunks: Sequence[RetrievedChunk],
+    ) -> AnswerDraft:
+        return AnswerDraft(
+            text="The mock model answers from the visible excerpts only.",
+            cited_chunk_ids=tuple(chunk.chunk_id for chunk in chunks),
+        )
 
 
 def _empty_result() -> KnowledgeExtractionResult:

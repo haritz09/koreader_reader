@@ -54,10 +54,9 @@ def test_chat_returns_only_evidence_visible_at_the_stored_position(
     wait_for_ready,
 ) -> None:
     book_id = _upload_and_wait(e2e_client, wait_for_ready)[0]
+    body = _wait_for_chat(e2e_client, book_id)
     positions = _chunk_positions(postgres_connection, book_id)
     assert positions, "the worker should have embedded chunks"
-
-    body = _wait_for_chat(e2e_client, book_id)
 
     assert body["book_id"] == book_id
     assert body["position"] == 0.0
@@ -77,10 +76,10 @@ def test_chat_sources_grow_with_reading_progress(
     wait_for_ready,
 ) -> None:
     book_id, document_hash = _upload_and_wait(e2e_client, wait_for_ready)
+    opening = _wait_for_chat(e2e_client, book_id)
     positions = _chunk_positions(postgres_connection, book_id)
     assert len(positions) > 1, "the fixture should produce more than one chunk"
 
-    opening = _wait_for_chat(e2e_client, book_id)
     opening_ids = {source["chunk_id"] for source in opening["sources"]}
 
     sync = e2e_client.post(

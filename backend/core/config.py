@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     embedding_quota_defer_seconds: int = 21600
     allow_mock_embeddings: bool = False
     rag_build_stale_seconds: int = 7200
+    retrieval_top_k: int = 8
     community_resolution: float = 1.0
     community_max_levels: int = 3
     community_min_size: int = 4

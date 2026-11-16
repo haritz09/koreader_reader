@@ -29,6 +29,7 @@ from rag.domain.clustering import (
     CommunityTree,
 )
 from rag.domain.embeddings import EmbeddingSource, EmbeddingSourceType
+from rag.domain.index_state import RagIndexState
 from rag.domain.status import RAG_INDEX_CURRENT_STATUSES, RagIndexStatus
 
 
@@ -41,6 +42,15 @@ class PostgresRagRepository:
             select(Book.graph_revision).where(Book.id == book_id)
         )
         return int(result.scalar_one_or_none() or 0)
+
+    async def get_index_state(self, book_id: str) -> RagIndexState | None:
+        state = await self._session.get(RagIndexStateRecord, book_id)
+        if state is None:
+            return None
+        return RagIndexState(
+            status=RagIndexStatus(state.status),
+            embedding_model=state.embedding_model,
+        )
 
     async def get_embedding_sources(self, book_id: str) -> list[EmbeddingSource]:
         sources = [

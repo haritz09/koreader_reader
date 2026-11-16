@@ -1,7 +1,6 @@
 """Spoiler-safe retrieval against a real PostgreSQL database."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,12 +9,13 @@ from core.domain.value_objects.reading_position import InvalidReadingPositionErr
 from db.models.book import Book
 from db.models.chapter import ChapterRecord
 from db.models.chunk import ChunkRecord
-from db.session import engine, session_factory
+from db.session import session_factory
 from rag.adapters.persistence.models import RagEmbeddingRecord
 from rag.adapters.persistence.retrieval_repository import (
     PostgresRetrievalRepository,
 )
 from rag.domain.embeddings import EMBEDDING_DIMENSIONS
+from tests.fixtures.postgres import run_against_postgres
 
 pytestmark = pytest.mark.postgres
 
@@ -132,20 +132,12 @@ def seed_index() -> None:
     asyncio.run(seed())
 
 
-def run_against_postgres(work: Callable[[AsyncSession], Awaitable[None]]) -> None:
-    async def main() -> None:
-        try:
-            async with session_factory() as session:
-                await work(session)
-        finally:
-            await engine.dispose()
-
-    asyncio.run(main())
+@pytest.fixture(autouse=True)
+def seeded(clean_postgres_database) -> None:
+    seed_index()
 
 
 def test_post_position_chunk_is_excluded_even_when_most_similar() -> None:
-    seed_index()
-
     async def work(session: AsyncSession) -> None:
         chunks = await PostgresRetrievalRepository(session).search_chunks(
             BOOK_ID, 0.5, MODEL, QUERY, 10
@@ -158,8 +150,6 @@ def test_post_position_chunk_is_excluded_even_when_most_similar() -> None:
 
 
 def test_boundary_position_is_inclusive() -> None:
-    seed_index()
-
     async def work(session: AsyncSession) -> None:
         chunks = await PostgresRetrievalRepository(session).search_chunks(
             BOOK_ID, 0.5, MODEL, QUERY, 10
@@ -171,8 +161,6 @@ def test_boundary_position_is_inclusive() -> None:
 
 
 def test_multiple_sources_collapse_to_one_chunk_with_the_best_distance() -> None:
-    seed_index()
-
     async def work(session: AsyncSession) -> None:
         chunks = await PostgresRetrievalRepository(session).search_chunks(
             BOOK_ID, 0.5, MODEL, QUERY, 10
@@ -185,8 +173,6 @@ def test_multiple_sources_collapse_to_one_chunk_with_the_best_distance() -> None
 
 
 def test_rows_without_a_chunk_are_skipped() -> None:
-    seed_index()
-
     async def work(session: AsyncSession) -> None:
         chunks = await PostgresRetrievalRepository(session).search_chunks(
             BOOK_ID, 0.5, MODEL, QUERY, 10
@@ -198,8 +184,6 @@ def test_rows_without_a_chunk_are_skipped() -> None:
 
 
 def test_other_embedding_models_are_ignored() -> None:
-    seed_index()
-
     async def work(session: AsyncSession) -> None:
         chunks = await PostgresRetrievalRepository(session).search_chunks(
             BOOK_ID, 0.5, MODEL, QUERY, 10
@@ -210,8 +194,6 @@ def test_other_embedding_models_are_ignored() -> None:
 
 
 def test_limit_truncates_the_best_results() -> None:
-    seed_index()
-
     async def work(session: AsyncSession) -> None:
         chunks = await PostgresRetrievalRepository(session).search_chunks(
             BOOK_ID, 0.5, MODEL, QUERY, 1
@@ -222,8 +204,6 @@ def test_limit_truncates_the_best_results() -> None:
 
 
 def test_unknown_book_returns_no_chunks() -> None:
-    seed_index()
-
     async def work(session: AsyncSession) -> None:
         chunks = await PostgresRetrievalRepository(session).search_chunks(
             "unknown-book", 0.5, MODEL, QUERY, 10

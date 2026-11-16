@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from adapters.auth.jwt_tokens import JwtTokenService
 from adapters.events.redis_book_status import RedisBookStatusSubscriber
 from adapters.koreader.progress_provider import KoreaderProgressAdapter
+from adapters.provider_factory import build_embedding_provider, build_llm_provider
 from adapters.queue.arq_graph_queue import ArqGraphGenerationQueue
 from adapters.queue.arq_queue import ArqEbookProcessingQueue
 from adapters.rate_limit.redis_rate_limiter import RedisRateLimiter
@@ -42,6 +43,14 @@ from db.repositories.postgres_graph_repository import PostgresGraphRepository
 from db.repositories.postgres_library_repository import PostgresLibraryRepository
 from db.repositories.postgres_user_repository import PostgresUserRepository
 from db.session import get_db_session, session_factory
+from rag.adapters.persistence.repository import PostgresRagRepository
+from rag.adapters.persistence.retrieval_repository import PostgresRetrievalRepository
+from rag.application.answer_question import AnswerQuestionUseCase
+from rag.application.retrieve import RetrieveContextUseCase
+from rag.ports.answer_provider import AnswerProvider
+from rag.ports.embedding_provider import EmbeddingProvider
+from rag.ports.index_state import RagIndexReader
+from rag.ports.retrieval_repository import RetrievalRepository
 
 
 def get_ebook_storage() -> EbookStorage:
@@ -232,3 +241,52 @@ def get_retry_ebook_use_case(
 	queue: EbookProcessingQueue = Depends(get_ebook_processing_queue),
 ) -> RetryEbookUseCase:
 	return RetryEbookUseCase(book_repository, queue)
+
+
+def get_rag_index_reader(
+	session: AsyncSession = Depends(get_db_session),
+) -> RagIndexReader:
+	return PostgresRagRepository(session)
+
+
+def get_retrieval_repository(
+	session: AsyncSession = Depends(get_db_session),
+) -> RetrievalRepository:
+	return PostgresRetrievalRepository(session)
+
+
+@lru_cache
+def get_embedding_provider() -> EmbeddingProvider:
+	return build_embedding_provider()
+
+
+@lru_cache
+def get_answer_provider() -> AnswerProvider:
+	return build_llm_provider()
+
+
+def get_retrieve_context_use_case(
+	repository: RetrievalRepository = Depends(get_retrieval_repository),
+	embeddings: EmbeddingProvider = Depends(get_embedding_provider),
+) -> RetrieveContextUseCase:
+	return RetrieveContextUseCase(
+		repository,
+		embeddings,
+		top_k=settings.retrieval_top_k,
+	)
+
+
+def get_answer_question_use_case(
+	library: LibraryRepository = Depends(get_library_repository),
+	index: RagIndexReader = Depends(get_rag_index_reader),
+	retrieval: RetrieveContextUseCase = Depends(get_retrieve_context_use_case),
+	answers: AnswerProvider = Depends(get_answer_provider),
+	embeddings: EmbeddingProvider = Depends(get_embedding_provider),
+) -> AnswerQuestionUseCase:
+	return AnswerQuestionUseCase(
+		library,
+		index,
+		retrieval,
+		answers,
+		embedding_model=embeddings.model,
+	)

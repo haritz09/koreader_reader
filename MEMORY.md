@@ -6,7 +6,7 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 
 - API-first backend; the planned client is Next.js with TypeScript.
 - Knowledge is hierarchical: books, chapters, chunks, entities, events, locations, facts. It is not a single static summary.
-- Answers must be traceable to source text. Embeddings and hierarchical knowledge communities are indexed under `backend/rag/`; queries, chat, cluster summaries, and graph generation from communities are not implemented.
+- Answers must be traceable to source text. Embeddings and hierarchical knowledge communities are indexed under `backend/rag/`; cluster summaries and graph generation from communities are not implemented.
 - EPUB uploads use the MD5 hash of the binary as the KOReader document identity.
 - Processing is asynchronous through ARQ. The source file is deleted after successful processing; derived chapters and chunks remain.
 - Chunk indices are globally monotonic per book. Chunks target 300-500 tokens with 50-100 tokens of overlap, so percentage ranges may overlap.
@@ -63,6 +63,15 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 - Reprocessing a book deletes its RAG index before `replace_derived_content`.
 - `build_rag_index` is a separate ARQ job queued by `generate_graph`. The graph job remains non-fatal; queueing failures are logged. `BuildRagIndexUseCase` records permanent failures without re-raising, marks quota exhaustion `pending` and defers, and re-raises transient failures so ARQ retries.
 - Postgres uses the `pgvector/pgvector:pg16` image in Compose and CI; the migration creates the `vector` extension.
+
+## Chat
+
+- `POST /api/v1/ebooks/{book_id}/chat` is one-shot: no history and no streaming. It reads the caller's stored `user_books.progress_position` and never accepts a position from the request.
+- The chat path answers only from retrieved chunk evidence. Hierarchical communities and graph nodes are not used in v1.
+- Chat is gated on the book being `ready` or `partial` and on the RAG index being `ready` or `partial` with the embedding model the API is currently configured to query. Any other state returns 409 before embedding or answering.
+- `sources` contains exactly the retrieved chunks the model cited, deduplicated and returned in retrieval order. Each source carries the chunk id, index, reading position, distance, and a bounded excerpt.
+- When no chunk is visible at the stored position, the use case returns a fixed non-empty answer without calling the LLM.
+- Chat and the worker share one provider factory, `backend/adapters/provider_factory.py`, so mock and failover selection cannot drift between them.
 
 ## LLM Extraction
 

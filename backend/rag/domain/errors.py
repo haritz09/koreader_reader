@@ -29,3 +29,11 @@ class RagBuildDeferred(Exception):
     def __init__(self, retry_after: float | None = None) -> None:
         super().__init__("RAG build deferred")
         self.retry_after = retry_after
+
+
+class RagIndexNotReadyError(Exception):
+    """Raised when chat cannot read the index at its current state."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"RAG index is not ready: {reason}")
+        self.reason = reason

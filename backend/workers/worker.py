@@ -9,7 +9,7 @@ from arq.connections import RedisSettings
 from adapters.events.redis_book_status import RedisBookStatusPublisher
 from adapters.llm.failover_provider import FailoverLLMProvider
 from adapters.llm.mock_provider import MockLLMProvider
-from adapters.llm.openai_provider import OpenAIProvider
+from adapters.provider_factory import build_embedding_provider, build_llm_provider
 from adapters.queue.arq_graph_queue import ArqGraphGenerationQueue
 from adapters.storage.epub_parser import EpubParser
 from adapters.storage.local_ebook_storage import LocalEbookStorage
@@ -23,8 +23,6 @@ from core.services.knowledge_extraction import KnowledgeExtractionService
 from db.repositories.knowledge_repository import PostgresKnowledgeRepository
 from db.repositories.postgres_book_repository import PostgresBookRepository
 from db.session import session_factory
-from rag.adapters.embeddings.gemini import GeminiEmbeddingProvider
-from rag.adapters.embeddings.mock import MockEmbeddingProvider
 from rag.adapters.persistence.repository import PostgresRagRepository
 from rag.adapters.queue.arq_rag_queue import ArqRagIndexQueue
 from rag.application.build_index import BuildRagIndexUseCase
@@ -32,47 +30,10 @@ from rag.application.embeddings import EmbedKnowledgeService
 from rag.clustering.leiden import LeidenCommunityDetector
 from rag.clustering.service import CommunityBuilder
 from rag.domain.clustering import ClusterParameters
-from rag.domain.embeddings import EMBEDDING_DIMENSIONS
 from rag.domain.errors import RagBuildDeferred
 from rag.ports.embedding_provider import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
-
-
-def _llm_models() -> list[str]:
-	models = [settings.llm_model]
-	models.extend(settings.llm_fallback_models.split(","))
-	return list(dict.fromkeys(model.strip() for model in models if model.strip()))
-
-
-def _build_llm_provider() -> FailoverLLMProvider | MockLLMProvider:
-	if settings.llm_provider == "mock":
-		if not settings.allow_mock_llm:
-			raise RuntimeError(
-				"LLM_PROVIDER=mock requires ALLOW_MOCK_LLM=true"
-			)
-		logger.warning(
-			"Mock LLM provider enabled; extraction will return empty knowledge"
-		)
-		return MockLLMProvider()
-	return FailoverLLMProvider(
-		[OpenAIProvider(model=model) for model in _llm_models()]
-	)
-
-
-def _build_embedding_provider() -> EmbeddingProvider:
-	if settings.embedding_dimensions != EMBEDDING_DIMENSIONS:
-		raise RuntimeError(
-			f"EMBEDDING_DIMENSIONS must be {EMBEDDING_DIMENSIONS}"
-		)
-	if settings.embedding_provider == "mock":
-		if not settings.allow_mock_embeddings:
-			raise RuntimeError(
-				"EMBEDDING_PROVIDER=mock requires ALLOW_MOCK_EMBEDDINGS=true"
-			)
-		logger.warning("Mock embedding provider enabled; vectors are deterministic")
-		return MockEmbeddingProvider()
-	return GeminiEmbeddingProvider()
 
 
 def _cluster_parameters() -> ClusterParameters:
@@ -107,8 +68,8 @@ def _build_extraction_service(
 async def startup(ctx: dict) -> None:
 	ctx["parser"] = EpubParser()
 	ctx["storage"] = LocalEbookStorage(Path(settings.ebook_storage_path))
-	ctx["llm_provider"] = _build_llm_provider()
-	ctx["embedding_provider"] = _build_embedding_provider()
+	ctx["llm_provider"] = build_llm_provider()
+	ctx["embedding_provider"] = build_embedding_provider()
 	ctx["status_publisher"] = RedisBookStatusPublisher(settings.redis_url)
 	ctx["session_factory"] = session_factory
 	ctx["book_repository_factory"] = PostgresBookRepository

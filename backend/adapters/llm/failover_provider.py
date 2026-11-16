@@ -1,5 +1,6 @@
 import logging
 import time
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -7,6 +8,8 @@ from adapters.llm.openai_provider import OpenAIProvider
 from core.domain.entities.graph import EntityCandidate
 from core.domain.entities.knowledge import KnowledgeExtractionResult
 from core.ports.llm_provider import LLMQuotaExhaustedError
+from rag.domain.chat import AnswerDraft
+from rag.domain.retrieval import RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +35,13 @@ class FailoverLLMProvider:
         candidates: list[EntityCandidate],
     ) -> list[list[str]]:
         return await self._call("resolve_group", candidates)
+
+    async def answer(
+        self,
+        question: str,
+        chunks: Sequence[RetrievedChunk],
+    ) -> AnswerDraft:
+        return await self._call("answer", question, chunks)
 
     async def _call(self, method: str, *args: object) -> object:
         now = time.monotonic()
