@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import random
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from uuid import uuid4
 
@@ -21,6 +22,11 @@ from core.ports.llm_provider import (
 
 logger = logging.getLogger(__name__)
 
+ExtractionProgressReporter = Callable[[int], Awaitable[None]]
+
+_ChunkBatch = list[tuple[str, Chunk]]
+_BatchResults = dict[str, KnowledgeExtractionResult] | None
+
 
 @dataclass(frozen=True)
 class ExtractionSummary:
@@ -32,6 +38,33 @@ class ExtractionSummary:
     events: int
     locations: int
     error: str | None = None
+
+
+@dataclass
+class _Progress:
+    succeeded: int = 0
+    failed: int = 0
+    entities: int = 0
+    facts: int = 0
+    events: int = 0
+    locations: int = 0
+
+    @property
+    def processed(self) -> int:
+        return self.succeeded + self.failed
+
+    def fail_batch(self, size: int) -> None:
+        self.failed += size
+
+    def fail_remaining(self, total: int) -> None:
+        self.failed = total - self.succeeded
+
+    def record(self, result: KnowledgeExtractionResult) -> None:
+        self.succeeded += 1
+        self.entities += len(result.entities)
+        self.facts += len(result.facts)
+        self.events += len(result.events)
+        self.locations += len(result.locations)
 
 
 class _RateLimiter:
@@ -49,6 +82,84 @@ class _RateLimiter:
             if self._next > now:
                 await asyncio.sleep(self._next - now)
             self._next = max(now, self._next) + self._interval
+
+
+def _split_batches(chunks: _ChunkBatch, batch_size: int) -> list[_ChunkBatch]:
+    return [chunks[index : index + batch_size] for index in range(0, len(chunks), batch_size)]
+
+
+def _received_every_chunk(batch: _ChunkBatch, results: _BatchResults) -> bool:
+    return results is not None and set(results) == {chunk_id for chunk_id, _ in batch}
+
+
+async def _completed_batches(
+    tasks: list[asyncio.Task],
+) -> AsyncIterator[tuple[_ChunkBatch, _BatchResults]]:
+    for completed in asyncio.as_completed(tasks):
+        yield await completed
+
+
+async def _cancel(tasks: list[asyncio.Task]) -> None:
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _report_progress(
+    reporter: ExtractionProgressReporter | None,
+    extracted: int,
+) -> None:
+    if reporter is not None:
+        await reporter(extracted)
+
+
+def _log_progress(
+    book_id: str,
+    completed_batches: int,
+    total_batches: int,
+    progress: _Progress,
+    total: int,
+) -> None:
+    logger.info(
+        "Knowledge extraction progress: book=%s batches=%d/%d chunks=%d/%d "
+        "succeeded=%d failed=%d",
+        book_id,
+        completed_batches,
+        total_batches,
+        progress.processed,
+        total,
+        progress.succeeded,
+        progress.failed,
+    )
+
+
+def _finished_summary(
+    book_id: str,
+    total: int,
+    progress: _Progress,
+    error: str | None = None,
+) -> ExtractionSummary:
+    if progress.succeeded == 0:
+        logger.error(
+            "Knowledge extraction failed: book=%s total=%d failed=%d",
+            book_id,
+            total,
+            progress.failed,
+        )
+        raise KnowledgeExtractionError(f"All {total} chunks failed extraction")
+    failure = error
+    if failure is None and progress.failed:
+        failure = f"{progress.failed} of {total} chunks failed extraction"
+    return ExtractionSummary(
+        total=total,
+        succeeded=progress.succeeded,
+        failed=progress.failed,
+        entities=progress.entities,
+        facts=progress.facts,
+        events=progress.events,
+        locations=progress.locations,
+        error=failure,
+    )
 
 
 class KnowledgeExtractionService:
@@ -99,17 +210,14 @@ class KnowledgeExtractionService:
     async def extract_from_chunks(
         self,
         book_id: str,
-        chunks_with_ids: list[tuple[str, Chunk]],
+        chunks_with_ids: _ChunkBatch,
+        on_progress: ExtractionProgressReporter | None = None,
     ) -> ExtractionSummary:
         total = len(chunks_with_ids)
         if total == 0:
             return ExtractionSummary(0, 0, 0, 0, 0, 0, 0)
 
-        semaphore = asyncio.Semaphore(self._concurrency)
-        batches = [
-            chunks_with_ids[index : index + self._batch_size]
-            for index in range(0, total, self._batch_size)
-        ]
+        batches = _split_batches(chunks_with_ids, self._batch_size)
         logger.info(
             "Knowledge extraction started: book=%s chunks=%d batches=%d batch_size=%d "
             "concurrency=%d",
@@ -119,159 +227,76 @@ class KnowledgeExtractionService:
             self._batch_size,
             self._concurrency,
         )
-        tasks = [
-            asyncio.create_task(self._extract_batch(batch, semaphore))
-            for batch in batches
-        ]
 
+        semaphore = asyncio.Semaphore(self._concurrency)
+        tasks = [
+            asyncio.create_task(self._extract_batch(batch, semaphore)) for batch in batches
+        ]
+        progress = _Progress()
         completed_batches = 0
-        succeeded = 0
-        failed = 0
-        entities = 0
-        facts = 0
-        events = 0
-        locations = 0
 
         try:
-            for completed in asyncio.as_completed(tasks):
-                batch, results = await completed
+            async for batch, results in _completed_batches(tasks):
                 completed_batches += 1
-                expected_ids = {chunk_id for chunk_id, _ in batch}
-                if results is None or set(results) != expected_ids:
-                    failed += len(batch)
-                    if results is not None:
-                        logger.warning(
-                            "Knowledge extraction returned an incomplete batch of %d chunks",
-                            len(batch),
-                        )
-                    logger.info(
-                        "Knowledge extraction progress: book=%s batches=%d/%d chunks=%d/%d "
-                        "succeeded=%d failed=%d",
-                        book_id,
-                        completed_batches,
-                        len(batches),
-                        succeeded + failed,
-                        total,
-                        succeeded,
-                        failed,
-                    )
-                    continue
-
-                for chunk_id, chunk in batch:
-                    result = results[chunk_id]
-                    tagged = self._tag_result(
-                        book_id,
-                        chunk_id,
-                        chunk.start_pctg,
-                        result,
-                    )
-                    await self._repository.insert_batch(book_id, tagged)
-                    succeeded += 1
-                    entities += len(tagged.entities)
-                    facts += len(tagged.facts)
-                    events += len(tagged.events)
-                    locations += len(tagged.locations)
-                logger.info(
-                    "Knowledge extraction progress: book=%s batches=%d/%d chunks=%d/%d "
-                    "succeeded=%d failed=%d",
-                    book_id,
-                    completed_batches,
-                    len(batches),
-                    succeeded + failed,
-                    total,
-                    succeeded,
-                    failed,
-                )
+                await self._consume_batch(book_id, batch, results, progress)
+                _log_progress(book_id, completed_batches, len(batches), progress, total)
+                await _report_progress(on_progress, progress.succeeded)
         except BaseException as error:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            if isinstance(error, LLMQuotaExhaustedError) and succeeded:
-                failed = total - succeeded
+            await _cancel(tasks)
+            if isinstance(error, LLMQuotaExhaustedError) and progress.succeeded:
+                progress.fail_remaining(total)
                 logger.warning(
                     "Knowledge extraction stopped at daily quota: book=%s total=%d "
                     "succeeded=%d failed=%d",
                     book_id,
                     total,
-                    succeeded,
-                    failed,
+                    progress.succeeded,
+                    progress.failed,
                 )
-                return ExtractionSummary(
-                    total=total,
-                    succeeded=succeeded,
-                    failed=failed,
-                    entities=entities,
-                    facts=facts,
-                    events=events,
-                    locations=locations,
-                    error=(
-                        f"{error}; {failed} of {total} chunks were not extracted"
-                    ),
+                return _finished_summary(
+                    book_id,
+                    total,
+                    progress,
+                    error=f"{error}; {progress.failed} of {total} chunks were not extracted",
                 )
-            logger.warning(
-                "Knowledge extraction aborted: book=%s batches=%d/%d chunks=%d/%d "
-                "succeeded=%d failed=%d unprocessed=%d",
-                book_id,
-                completed_batches,
-                len(batches),
-                succeeded + failed,
-                total,
-                succeeded,
-                failed,
-                total - succeeded - failed,
-            )
+            _log_abort(book_id, completed_batches, len(batches), progress, total)
             raise
 
-        if succeeded == 0:
-            logger.error(
-                "Knowledge extraction failed: book=%s total=%d failed=%d",
-                book_id,
-                total,
-                failed,
-            )
-            raise KnowledgeExtractionError(f"All {total} chunks failed extraction")
-
-        summary = ExtractionSummary(
-            total=total,
-            succeeded=succeeded,
-            failed=failed,
-            entities=entities,
-            facts=facts,
-            events=events,
-            locations=locations,
-            error=f"{failed} of {total} chunks failed extraction" if failed else None,
-        )
-        if failed:
-            logger.warning(
-                "Knowledge extraction finished with failures: book=%s total=%d "
-                "succeeded=%d failed=%d",
-                book_id,
-                total,
-                succeeded,
-                failed,
-            )
-        logger.info(
-            "Knowledge extraction finished: book=%s total=%d succeeded=%d failed=%d "
-            "entities=%d facts=%d events=%d locations=%d",
-            book_id,
-            total,
-            succeeded,
-            failed,
-            entities,
-            facts,
-            events,
-            locations,
-        )
+        summary = _finished_summary(book_id, total, progress)
+        _log_finished(book_id, summary)
         return summary
+
+    async def _consume_batch(
+        self,
+        book_id: str,
+        batch: _ChunkBatch,
+        results: _BatchResults,
+        progress: _Progress,
+    ) -> None:
+        if not _received_every_chunk(batch, results):
+            progress.fail_batch(len(batch))
+            if results is not None:
+                logger.warning(
+                    "Knowledge extraction returned an incomplete batch of %d chunks",
+                    len(batch),
+                )
+            return
+
+        for chunk_id, chunk in batch:
+            tagged = self._tag_result(
+                book_id,
+                chunk_id,
+                chunk.start_pctg,
+                results[chunk_id],
+            )
+            await self._repository.insert_batch(book_id, chunk_id, tagged)
+            progress.record(tagged)
 
     async def _extract_batch(
         self,
-        batch: list[tuple[str, Chunk]],
+        batch: _ChunkBatch,
         semaphore: asyncio.Semaphore,
-    ) -> tuple[
-        list[tuple[str, Chunk]],
-        dict[str, KnowledgeExtractionResult] | None,
-    ]:
+    ) -> tuple[_ChunkBatch, _BatchResults]:
         async with semaphore:
             try:
                 return batch, await self._extract_batch_with_retry(batch)
@@ -293,7 +318,7 @@ class KnowledgeExtractionService:
 
     async def _extract_batch_with_retry(
         self,
-        batch: list[tuple[str, Chunk]],
+        batch: _ChunkBatch,
     ) -> dict[str, KnowledgeExtractionResult]:
         chunks = [(chunk_id, chunk.text) for chunk_id, chunk in batch]
         for attempt in range(1, self._max_attempts + 1):
@@ -371,3 +396,48 @@ class KnowledgeExtractionService:
                 for loc in result.locations
             ],
         )
+
+
+def _log_abort(
+    book_id: str,
+    completed_batches: int,
+    total_batches: int,
+    progress: _Progress,
+    total: int,
+) -> None:
+    logger.warning(
+        "Knowledge extraction aborted: book=%s batches=%d/%d chunks=%d/%d "
+        "succeeded=%d failed=%d unprocessed=%d",
+        book_id,
+        completed_batches,
+        total_batches,
+        progress.processed,
+        total,
+        progress.succeeded,
+        progress.failed,
+        total - progress.processed,
+    )
+
+
+def _log_finished(book_id: str, summary: ExtractionSummary) -> None:
+    if summary.failed:
+        logger.warning(
+            "Knowledge extraction finished with failures: book=%s total=%d "
+            "succeeded=%d failed=%d",
+            book_id,
+            summary.total,
+            summary.succeeded,
+            summary.failed,
+        )
+    logger.info(
+        "Knowledge extraction finished: book=%s total=%d succeeded=%d failed=%d "
+        "entities=%d facts=%d events=%d locations=%d",
+        book_id,
+        summary.total,
+        summary.succeeded,
+        summary.failed,
+        summary.entities,
+        summary.facts,
+        summary.events,
+        summary.locations,
+    )

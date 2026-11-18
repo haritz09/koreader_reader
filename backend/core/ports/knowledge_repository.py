@@ -17,6 +17,7 @@ class KnowledgeRepository(Protocol):
     async def insert_batch(
         self,
         book_id: str,
+        chunk_id: str,
         result: KnowledgeExtractionResult,
     ) -> None: ...
 

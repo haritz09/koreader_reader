@@ -17,6 +17,8 @@ class EbookStatusResponse(EbookUploadResponse):
     last_synced_at: datetime | None = None
     title: str | None = None
     author: str | None = None
+    chunks_total: int | None = None
+    chunks_extracted: int | None = None
 
 
 class EbookListResponse(BaseModel):

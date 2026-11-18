@@ -6,6 +6,8 @@ from typing import Protocol
 class BookStatusEvent:
 	status: str
 	error: str | None = None
+	chunks_total: int | None = None
+	chunks_extracted: int | None = None
 
 
 class BookStatusPublisher(Protocol):
@@ -14,6 +16,9 @@ class BookStatusPublisher(Protocol):
 		book_id: str,
 		status: str,
 		error: str | None = None,
+		*,
+		chunks_total: int | None = None,
+		chunks_extracted: int | None = None,
 	) -> None: ...
 
 	async def aclose(self) -> None: ...

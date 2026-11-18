@@ -3,7 +3,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.dependencies import get_answer_question_use_case, get_current_owner
-from api.schemas.chat import ChatRequest, ChatResponse, ChatSourceResponse
+from api.presenters.chat import chat_response
+from api.schemas.chat import ChatRequest, ChatResponse
 from core.domain.errors import BookNotFoundError, BookNotReadyError
 from rag.application.answer_question import AnswerQuestionUseCase
 from rag.domain.errors import RagIndexNotReadyError
@@ -29,19 +30,4 @@ async def chat_with_book(
 			status_code=status.HTTP_409_CONFLICT, detail=str(error)
 		) from error
 
-	return ChatResponse(
-		book_id=answer.book_id,
-		position=answer.position,
-		model=answer.model,
-		answer=answer.answer,
-		sources=[
-			ChatSourceResponse(
-				chunk_id=source.chunk_id,
-				chunk_index=source.chunk_index,
-				reading_position=source.reading_position,
-				distance=source.distance,
-				excerpt=source.excerpt,
-			)
-			for source in answer.sources
-		],
-	)
+	return chat_response(answer)

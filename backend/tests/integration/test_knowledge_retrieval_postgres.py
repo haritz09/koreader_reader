@@ -17,6 +17,7 @@ from db.models.book import Book
 from db.models.chapter import ChapterRecord
 from db.models.chunk import ChunkRecord
 from db.repositories.knowledge_repository import PostgresKnowledgeRepository
+from db.repositories.postgres_book_repository import PostgresBookRepository
 from db.session import engine, session_factory
 
 pytestmark = pytest.mark.postgres
@@ -290,5 +291,45 @@ def test_retrieval_never_returns_knowledge_from_another_book(
             "events": ["book-a-chunk-0"],
             "locations": ["book-a-chunk-0"],
         }
+
+    _run_against_postgres(work)
+
+
+class _EmptyLLMProvider:
+    async def extract_knowledge_batch(
+        self,
+        chunks: list[tuple[str, str]],
+    ) -> dict[str, KnowledgeExtractionResult]:
+        return {
+            chunk_id: KnowledgeExtractionResult(
+                entities=[], facts=[], events=[], locations=[]
+            )
+            for chunk_id, _ in chunks
+        }
+
+
+def test_extraction_marks_every_attempted_chunk_as_pending_done(
+    clean_postgres_database: None,
+) -> None:
+    async def work(session: AsyncSession) -> None:
+        chunks = await _seed_chunks(session, "book-a", [0.0, 0.4, 0.9])
+        book_repository = PostgresBookRepository(session)
+
+        assert await book_repository.count_chunks("book-a") == 3
+        assert [
+            chunk_id
+            for chunk_id, _ in await book_repository.get_pending_chunks("book-a")
+        ] == ["book-a-chunk-0", "book-a-chunk-1", "book-a-chunk-2"]
+
+        await _extract_knowledge(session, "book-a", chunks[:1])
+        await KnowledgeExtractionService(
+            _EmptyLLMProvider(),
+            PostgresKnowledgeRepository(session),
+        ).extract_from_chunks("book-a", [("book-a-chunk-2", chunks[2])])
+
+        pending = await book_repository.get_pending_chunks("book-a")
+
+        assert [chunk_id for chunk_id, _ in pending] == ["book-a-chunk-1"]
+        assert pending[0][1].text == "book-a-text-1"
 
     _run_against_postgres(work)

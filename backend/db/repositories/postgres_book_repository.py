@@ -1,9 +1,10 @@
 """Book repository implementation for postgres."""
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.domain.entities.chunk import Chunk
 from core.domain.entities.graph import BookState
 from core.domain.status import FAILED, PARTIAL, PENDING, PROCESSING, READY
 from db.models.book import Book
@@ -97,21 +98,16 @@ class PostgresBookRepository:
 		)
 		self._session.add_all(
 			ChapterRecord(
-				id=chapter.chapter_id,
-				book_id=book_id,
-				title=chapter.title,
-				chapter_index=chapter.chapter_index,
+				id=chapter.chapter_id, book_id=book_id,
+				title=chapter.title, chapter_index=chapter.chapter_index,
 			)
 			for chapter in chapters
 		)
 		self._session.add_all(
 			ChunkRecord(
-				book_id=book_id,
-				chapter_id=chunk.chapter_id,
-				chunk_index=chunk.chunk_index,
-				text=chunk.text,
-				start_pctg=chunk.start_pctg,
-				end_pctg=chunk.end_pctg,
+				book_id=book_id, chapter_id=chunk.chapter_id,
+				chunk_index=chunk.chunk_index, text=chunk.text,
+				start_pctg=chunk.start_pctg, end_pctg=chunk.end_pctg,
 			)
 			for chunk in chunks
 		)
@@ -141,13 +137,43 @@ class PostgresBookRepository:
 		book.processing_error = error[:2000]
 		await self._session.commit()
 
-	async def get_chunk_ids_by_book(self, book_id: str) -> list[tuple[str, int]]:
+	async def count_chunks(self, book_id: str) -> int:
 		result = await self._session.execute(
-			select(ChunkRecord.id, ChunkRecord.chunk_index)
+			select(func.count())
+			.select_from(ChunkRecord)
 			.where(ChunkRecord.book_id == book_id)
+		)
+		return result.scalar_one()
+
+	async def get_pending_chunks(self, book_id: str) -> list[tuple[str, Chunk]]:
+		result = await self._session.execute(
+			select(
+				ChunkRecord.id,
+				ChunkRecord.chapter_id,
+				ChunkRecord.chunk_index,
+				ChunkRecord.text,
+				ChunkRecord.start_pctg,
+				ChunkRecord.end_pctg,
+			)
+			.where(
+				ChunkRecord.book_id == book_id,
+				ChunkRecord.extracted_at.is_(None),
+			)
 			.order_by(ChunkRecord.chunk_index)
 		)
-		return result.all()
+		return [
+			(
+				row[0],
+				Chunk(
+					chapter_id=row[1],
+					chunk_index=row[2],
+					text=row[3],
+					start_pctg=row[4],
+					end_pctg=row[5],
+				),
+			)
+			for row in result.all()
+		]
 
 	async def get_state(self, book_id: str) -> BookState | None:
 		result = await self._session.execute(

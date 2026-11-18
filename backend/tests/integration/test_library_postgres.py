@@ -223,6 +223,41 @@ def test_a_long_lived_reader_sees_status_changes_made_elsewhere(
     assert seen == ["processing", "ready"]
 
 
+def test_status_reads_report_extraction_progress(
+    clean_postgres_database,
+    postgres_connection,
+) -> None:
+    postgres_connection.execute(
+        "INSERT INTO books (id, document_hash, storage_key, processing_status) "
+        "VALUES ('book-1', 'hash-1', 'books/1.epub', 'processing')"
+    )
+    postgres_connection.execute(
+        "INSERT INTO chapters (id, book_id, title, chapter_index) "
+        "VALUES ('chapter-1', 'book-1', 'Chapter', 0)"
+    )
+    postgres_connection.execute(
+        "INSERT INTO chunks "
+        "(id, book_id, chapter_id, chunk_index, text, start_pctg, end_pctg, extracted_at) "
+        "VALUES "
+        "('chunk-1', 'book-1', 'chapter-1', 0, 'one', 0.0, 0.5, now()), "
+        "('chunk-2', 'book-1', 'chapter-1', 1, 'two', 0.5, 1.0, NULL)"
+    )
+    postgres_connection.execute(
+        "INSERT INTO user_books (owner_id, book_id, added_at) VALUES (%s, 'book-1', now())",
+        (TEST_OWNER_ID,),
+    )
+    postgres_connection.commit()
+
+    async def work(session: AsyncSession) -> None:
+        library = PostgresLibraryRepository(session)
+        book = await library.get_book(TEST_OWNER_ID, "book-1")
+
+        assert book is not None
+        assert (book.chunks_total, book.chunks_extracted) == (2, 1)
+
+    _run_against_postgres(work)
+
+
 def test_reading_progress_is_stored_per_owner(
     clean_postgres_database,
     postgres_connection,

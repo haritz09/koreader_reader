@@ -1,8 +1,17 @@
 """Chunk persistence model."""
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+	DateTime,
+	Float,
+	ForeignKey,
+	Integer,
+	String,
+	Text,
+	UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -19,3 +28,6 @@ class ChunkRecord(Base):
 	text: Mapped[str] = mapped_column(Text, nullable=False)
 	start_pctg: Mapped[float] = mapped_column(Float, nullable=False)
 	end_pctg: Mapped[float] = mapped_column(Float, nullable=False)
+	extracted_at: Mapped[datetime | None] = mapped_column(
+		DateTime(timezone=True), nullable=True
+	)

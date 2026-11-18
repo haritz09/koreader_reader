@@ -48,6 +48,8 @@ export interface EbookStatusResponse extends EbookUploadResponse {
   last_synced_at: string | null;
   title: string | null;
   author: string | null;
+  chunks_total?: number | null;
+  chunks_extracted?: number | null;
 }
 
 export interface EbookListResponse {

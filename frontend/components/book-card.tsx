@@ -9,6 +9,7 @@ import {
   PROCESSING,
   READY,
   RETRYABLE_STATUSES,
+  extractionPercent,
 } from "@/lib/status";
 import type { EbookStatusResponse } from "@/types/api";
 
@@ -33,7 +34,10 @@ export function BookCard({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const progressPercent = Math.round(book.progress_position * 100);
+  const extraction = extractionPercent(book);
   const isProcessing = book.processing_status === PROCESSING;
+  const showExtraction =
+    extraction !== null && (isProcessing || book.processing_status === PARTIAL);
   const canOpenGraph = GRAPH_STATUSES.has(book.processing_status);
   const canRetry = RETRYABLE_STATUSES.has(book.processing_status);
 
@@ -215,6 +219,31 @@ export function BookCard({
             {progressPercent}%
           </span>
         </div>
+        {showExtraction && (
+          <div className="mt-2">
+            <div className="flex items-center gap-2">
+              <div
+                role="progressbar"
+                aria-label="Progreso de procesamiento"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={extraction ?? 0}
+                className="h-1 flex-1 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700"
+              >
+                <div
+                  className="h-1 rounded-full bg-accent/70 transition-[width] duration-500 ease-out"
+                  style={{ width: `${extraction ?? 0}%` }}
+                />
+              </div>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {book.chunks_extracted ?? 0}/{book.chunks_total ?? 0}
+              </span>
+            </div>
+            <p className="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">
+              {isProcessing ? "Procesando libro" : "Extracción incompleta"}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

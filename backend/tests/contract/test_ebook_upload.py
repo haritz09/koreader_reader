@@ -87,6 +87,8 @@ def a_book(
     processing_status: str = "ready",
     progress_position: float = 0.0,
     processing_error: str | None = None,
+    chunks_total: int = 0,
+    chunks_extracted: int = 0,
 ) -> LibraryBook:
     return LibraryBook(
         book_id="book-123",
@@ -97,6 +99,8 @@ def a_book(
         progress_position=progress_position,
         added_at=datetime(2026, 1, 1, tzinfo=UTC),
         last_synced_at=None,
+        chunks_total=chunks_total,
+        chunks_extracted=chunks_extracted,
     )
 
 
@@ -144,6 +148,33 @@ def test_status_endpoint_omits_processing_error_for_pending_book() -> None:
         "document_hash": "hash-123",
         "processing_status": "pending",
         "progress_position": 0.0,
+    }
+
+
+def test_status_endpoint_exposes_extraction_progress() -> None:
+    book = a_book(
+        processing_status="processing",
+        chunks_total=121,
+        chunks_extracted=18,
+    )
+    app.dependency_overrides[get_library_repository] = lambda: FakeLibraryRepository(book)
+    client = TestClient(app)
+
+    try:
+        response = client.get("/api/v1/ebooks/book-123")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body.pop("added_at")
+    assert body == {
+        "book_id": "book-123",
+        "document_hash": "hash-123",
+        "processing_status": "processing",
+        "progress_position": 0.0,
+        "chunks_total": 121,
+        "chunks_extracted": 18,
     }
 
 

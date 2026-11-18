@@ -1,4 +1,8 @@
-import { TERMINAL_STATUSES, type ProcessingStatus } from "@/lib/status";
+import {
+  TERMINAL_STATUSES,
+  type ProcessingProgress,
+  type ProcessingStatus,
+} from "@/lib/status";
 import type {
   EbookListResponse,
   EbookStatusResponse,
@@ -117,7 +121,11 @@ export async function getGraph(bookId: string): Promise<GraphResponse> {
 
 export function streamBookEvents(
   bookId: string,
-  onStatus: (status: ProcessingStatus, error: string | null) => void,
+  onStatus: (
+    status: ProcessingStatus,
+    error: string | null,
+    progress: ProcessingProgress | null
+  ) => void,
   onDone: () => void
 ): () => void {
   const es = new EventSource(`${API_BASE}/ebooks/${bookId}/events`, {
@@ -140,7 +148,12 @@ export function streamBookEvents(
       return;
     }
     if (data.type === "status") {
-      onStatus(data.status, data.error);
+      const progress =
+        typeof data.chunks_total === "number" &&
+        typeof data.chunks_extracted === "number"
+          ? { total: data.chunks_total, extracted: data.chunks_extracted }
+          : null;
+      onStatus(data.status, data.error, progress);
       if (TERMINAL_STATUSES.has(data.status)) {
         finish();
       }

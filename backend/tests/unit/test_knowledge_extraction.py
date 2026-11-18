@@ -39,14 +39,15 @@ class FakeLLMProvider:
 
 class FakeKnowledgeRepository:
     def __init__(self) -> None:
-        self.inserted: list[tuple[str, KnowledgeExtractionResult]] = []
+        self.inserted: list[tuple[str, str, KnowledgeExtractionResult]] = []
 
     async def insert_batch(
         self,
         book_id: str,
+        chunk_id: str,
         result: KnowledgeExtractionResult,
     ) -> None:
-        self.inserted.append((book_id, result))
+        self.inserted.append((book_id, chunk_id, result))
 
 
 def _make_chunk(index: int = 0) -> Chunk:
@@ -104,6 +105,24 @@ def test_extract_from_chunks_batches_chunks_in_groups_of_three() -> None:
     asyncio.run(_run())
 
 
+def test_extract_from_chunks_reports_cumulative_progress_per_batch() -> None:
+    async def _run() -> None:
+        llm = FakeLLMProvider(_extraction_result())
+        repo = FakeKnowledgeRepository()
+        service = _service(llm, repo, batch_size=2)
+        reported: list[int] = []
+
+        async def report(extracted: int) -> None:
+            reported.append(extracted)
+
+        chunks = [(f"chunk-{index}", _make_chunk(index)) for index in range(5)]
+        await service.extract_from_chunks("book-1", chunks, on_progress=report)
+
+        assert reported == [2, 4, 5]
+
+    asyncio.run(_run())
+
+
 def test_extract_from_chunks_tags_with_book_id_and_chunk_id() -> None:
     async def _run() -> None:
         result = _extraction_result()
@@ -113,8 +132,9 @@ def test_extract_from_chunks_tags_with_book_id_and_chunk_id() -> None:
 
         await service.extract_from_chunks("book-1", [("chunk-42", _make_chunk(0))])
 
-        book_id, stored_result = repo.inserted[0]
+        book_id, chunk_id, stored_result = repo.inserted[0]
         assert book_id == "book-1"
+        assert chunk_id == "chunk-42"
         for e in stored_result.entities:
             assert e.book_id == "book-1"
             assert e.chunk_id == "chunk-42"
@@ -147,7 +167,7 @@ def test_extract_from_chunks_sets_reading_position_from_chunk() -> None:
         )
         await service.extract_from_chunks("book-1", [("c1", chunk_with_pctg)])
 
-        _, stored_result = repo.inserted[0]
+        _, _, stored_result = repo.inserted[0]
         for item in [*stored_result.entities, *stored_result.facts, *stored_result.events, *stored_result.locations]:
             assert item.reading_position == 0.35
 
@@ -312,7 +332,7 @@ def test_extract_from_chunks_assigns_unique_ids() -> None:
 
         await service.extract_from_chunks("book-1", [("c1", _make_chunk(0))])
 
-        _, stored_result = repo.inserted[0]
+        _, _, stored_result = repo.inserted[0]
         ids = [e.entity_id for e in stored_result.entities]
         assert len(ids) == len(set(ids))
 

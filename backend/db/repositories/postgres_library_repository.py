@@ -8,7 +8,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.entities.library import LibraryBook, ReadingState
 from db.models.book import Book
+from db.models.chunk import ChunkRecord
 from db.models.user_book import UserBookRecord
+
+
+def _chunk_count(*, extracted_only: bool):
+	query = (
+		select(func.count())
+		.select_from(ChunkRecord)
+		.where(ChunkRecord.book_id == Book.id)
+	)
+	if extracted_only:
+		query = query.where(ChunkRecord.extracted_at.is_not(None))
+	return query.scalar_subquery()
 
 
 class PostgresLibraryRepository:
@@ -116,6 +128,8 @@ class PostgresLibraryRepository:
 				UserBookRecord.progress_position,
 				UserBookRecord.added_at,
 				UserBookRecord.last_synced_at,
+				_chunk_count(extracted_only=False).label("chunks_total"),
+				_chunk_count(extracted_only=True).label("chunks_extracted"),
 			)
 			.select_from(Book)
 			.join(UserBookRecord, UserBookRecord.book_id == Book.id)

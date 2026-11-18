@@ -22,5 +22,13 @@ class BookProcessingError(Exception):
         )
 
 
+class SessionNotFoundError(Exception):
+    """Raised when a verified token names a user that no longer exists."""
+
+
+class CoverNotFoundError(Exception):
+    """Raised when a book has no cover that can be served."""
+
+
 class KnowledgeExtractionError(Exception):
     pass

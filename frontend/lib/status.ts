@@ -28,3 +28,20 @@ export const RETRYABLE_STATUSES: ReadonlySet<string> = new Set([
   FAILED,
   PARTIAL,
 ]);
+
+export interface ProcessingProgress {
+  total: number;
+  extracted: number;
+}
+
+interface ProgressCounts {
+  chunks_total?: number | null;
+  chunks_extracted?: number | null;
+}
+
+export function extractionPercent(book: ProgressCounts): number | null {
+  const total = book.chunks_total ?? 0;
+  if (total <= 0) return null;
+  const extracted = Math.min(book.chunks_extracted ?? 0, total);
+  return Math.round((extracted / total) * 100);
+}

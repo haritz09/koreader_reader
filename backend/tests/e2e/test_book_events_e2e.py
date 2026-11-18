@@ -54,10 +54,19 @@ def test_the_status_stream_reports_the_status_the_book_reached(
             event for event in _status_events(response) if event["type"] == "status"
         ]
 
+    total, extracted = postgres_connection.execute(
+        "SELECT count(*), count(extracted_at) FROM chunks WHERE book_id = %s",
+        (book_id,),
+    ).fetchone()
+    progress = (
+        {"chunks_total": total, "chunks_extracted": extracted} if total else {}
+    )
+
     assert partial_events == [
         {
             "type": "status",
             "status": "partial",
             "error": "Some chunks could not be extracted",
+            **progress,
         }
     ]

@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 
-from sqlalchemy import case, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.entities.graph import EntityCandidate
@@ -14,6 +14,7 @@ from core.domain.entities.knowledge import (
     Location,
 )
 from core.domain.value_objects.reading_position import validate_reading_position
+from db.models.chunk import ChunkRecord
 from db.models.knowledge import EntityRecord, EventRecord, FactRecord, LocationRecord
 
 
@@ -24,56 +25,46 @@ class PostgresKnowledgeRepository:
     async def insert_batch(
         self,
         book_id: str,
+        chunk_id: str,
         result: KnowledgeExtractionResult,
     ) -> None:
         self._session.add_all(
             EntityRecord(
-                id=e.entity_id,
-                book_id=e.book_id,
-                chunk_id=e.chunk_id,
-                name=e.name,
-                entity_type=e.entity_type,
-                description=e.description,
-                sub_type=e.sub_type,
-                aliases=list(e.aliases),
-                reading_position=e.reading_position,
-                importance=e.importance,
+                id=e.entity_id, book_id=e.book_id, chunk_id=e.chunk_id,
+                name=e.name, entity_type=e.entity_type, description=e.description,
+                sub_type=e.sub_type, aliases=list(e.aliases),
+                reading_position=e.reading_position, importance=e.importance,
             )
             for e in result.entities
         )
         self._session.add_all(
             FactRecord(
-                id=f.fact_id,
-                book_id=f.book_id,
-                chunk_id=f.chunk_id,
-                statement=f.statement,
-                subject=f.subject,
-                object=f.object,
+                id=f.fact_id, book_id=f.book_id, chunk_id=f.chunk_id,
+                statement=f.statement, subject=f.subject, object=f.object,
                 reading_position=f.reading_position,
             )
             for f in result.facts
         )
         self._session.add_all(
             EventRecord(
-                id=ev.event_id,
-                book_id=ev.book_id,
-                chunk_id=ev.chunk_id,
-                name=ev.name,
-                description=ev.description,
+                id=ev.event_id, book_id=ev.book_id, chunk_id=ev.chunk_id,
+                name=ev.name, description=ev.description,
                 reading_position=ev.reading_position,
             )
             for ev in result.events
         )
         self._session.add_all(
             LocationRecord(
-                id=loc.location_id,
-                book_id=loc.book_id,
-                chunk_id=loc.chunk_id,
-                name=loc.name,
-                description=loc.description,
+                id=loc.location_id, book_id=loc.book_id, chunk_id=loc.chunk_id,
+                name=loc.name, description=loc.description,
                 reading_position=loc.reading_position,
             )
             for loc in result.locations
+        )
+        await self._session.execute(
+            update(ChunkRecord)
+            .where(ChunkRecord.id == chunk_id)
+            .values(extracted_at=func.now())
         )
         await self._session.commit()
 

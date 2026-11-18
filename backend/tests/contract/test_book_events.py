@@ -15,9 +15,18 @@ from main import app
 
 
 class StatusBook:
-    def __init__(self, status: str | None, error: str | None = None) -> None:
+    def __init__(
+        self,
+        status: str | None,
+        error: str | None = None,
+        *,
+        chunks_total: int = 0,
+        chunks_extracted: int = 0,
+    ) -> None:
         self.processing_status = status
         self.processing_error = error
+        self.chunks_total = chunks_total
+        self.chunks_extracted = chunks_extracted
 
 
 class ScriptedLibrary:
@@ -132,6 +141,42 @@ def test_the_stream_reports_partial_as_a_terminal_status() -> None:
 
     assert events == [{"type": "status", "status": "partial", "error": None}]
     assert subscriber.subscription is None
+
+
+def test_the_stream_forwards_processing_progress() -> None:
+    library = ScriptedLibrary(["processing", "processing"])
+    subscriber = ScriptedSubscriber(
+        [
+            BookStatusEvent("processing", chunks_total=121, chunks_extracted=18),
+            BookStatusEvent("ready", chunks_total=121, chunks_extracted=121),
+        ]
+    )
+    _use(library, subscriber)
+
+    try:
+        with TestClient(app) as client:
+            events = _events(client)
+    finally:
+        app.dependency_overrides.pop(get_library_repository_factory, None)
+        app.dependency_overrides.pop(get_book_status_subscriber, None)
+
+    assert events == [
+        {"type": "status", "status": "processing", "error": None},
+        {
+            "type": "status",
+            "status": "processing",
+            "error": None,
+            "chunks_total": 121,
+            "chunks_extracted": 18,
+        },
+        {
+            "type": "status",
+            "status": "ready",
+            "error": None,
+            "chunks_total": 121,
+            "chunks_extracted": 121,
+        },
+    ]
 
 
 def test_the_stream_reports_an_error_and_closes_when_the_book_is_gone() -> None:

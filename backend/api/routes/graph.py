@@ -3,7 +3,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.dependencies import get_book_graph_use_case, get_current_owner
-from api.schemas.graph import GraphEdgeResponse, GraphNodeResponse, GraphResponse
+from api.presenters.graph import graph_response
+from api.schemas.graph import GraphResponse
 from core.application.use_cases.get_book_graph import GetBookGraphUseCase
 from core.domain.errors import BookNotFoundError, BookNotReadyError
 
@@ -30,33 +31,4 @@ async def get_book_graph(
 			status_code=status.HTTP_409_CONFLICT, detail=str(error)
 		) from error
 
-	return GraphResponse(
-		book_id=graph.book_id,
-		position=graph.position,
-		revision=graph.revision,
-        nodes=[
-					GraphNodeResponse(
-						node_id=node.node_id,
-						label=node.label,
-						node_type=node.node_type,
-						first_seen_position=node.first_seen_position,
-						mention_count=node.mention_count,
-						description=node.description,
-						sub_type=node.sub_type,
-						aliases=list(node.aliases),
-						importance=node.importance,
-					)
-					for node in graph.nodes
-				],
-		edges=[
-			GraphEdgeResponse(
-				edge_id=edge.edge_id,
-				source_id=edge.source_id,
-				target_id=edge.target_id,
-				statement=edge.statement,
-				position=edge.position,
-				chunk_id=edge.chunk_id,
-			)
-			for edge in graph.edges
-		],
-	)
+	return graph_response(graph)

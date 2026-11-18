@@ -45,11 +45,21 @@ export function BookGrid({ onSelectBook }: BookGridProps) {
     const cleanups = processingBookIds.split(",").map((bookId) =>
       streamBookEvents(
         bookId,
-        (status, error) => {
+        (status, error, progress) => {
           setBooks((prev) =>
             prev.map((b) =>
               b.book_id === bookId
-                ? { ...b, processing_status: status, processing_error: error }
+                ? {
+                    ...b,
+                    processing_status: status,
+                    processing_error: error,
+                    ...(progress
+                      ? {
+                          chunks_total: progress.total,
+                          chunks_extracted: progress.extracted,
+                        }
+                      : {}),
+                  }
                 : b
             )
           );

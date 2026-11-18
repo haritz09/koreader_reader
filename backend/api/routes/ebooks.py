@@ -1,72 +1,61 @@
-import asyncio
-import json
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 
 from api.dependencies import (
-	get_book_status_subscriber,
+	get_book_cover_use_case,
 	get_current_owner,
 	get_delete_ebook_use_case,
-	get_library_repository,
-	get_library_repository_factory,
+	get_ebook_status_use_case,
+	get_list_ebooks_use_case,
 	get_retry_ebook_use_case,
+	get_stream_book_status_use_case,
+	get_stream_position_events_use_case,
 	get_upload_ebook_use_case,
 )
+from api.presenters.ebooks import (
+	book_list_response,
+	book_status_response,
+	cover_response,
+	retry_response,
+	upload_response,
+)
+from api.presenters.sse import (
+	error_event_response,
+	position_stream_response,
+	status_stream_response,
+)
 from api.schemas.ebooks import EbookListResponse, EbookStatusResponse, EbookUploadResponse
+from core.application.use_cases.browse_library import (
+	GetEbookStatusUseCase,
+	ListEbooksUseCase,
+)
 from core.application.use_cases.delete_ebook import DeleteEbookUseCase
+from core.application.use_cases.get_book_cover import GetBookCoverUseCase
 from core.application.use_cases.process_ebook import (
 	EbookTooLargeError,
 	InvalidEbookError,
 	UploadEbookUseCase,
 )
 from core.application.use_cases.retry_ebook import (
-	BookNotFoundError as RetryBookNotFoundError,
-)
-from core.application.use_cases.retry_ebook import (
 	BookNotRetryableError,
 	RetryEbookUseCase,
-	RetryResult,
 )
-from core.domain.entities.library import LibraryBook
-from core.domain.errors import BookNotFoundError, BookProcessingError
-from core.domain.status import TERMINAL_STATUSES
-from core.ports.book_status_events import BookStatusSubscriber, BookStatusSubscription
-from core.ports.library_repository import LibraryRepository, LibraryRepositoryFactory
+from core.application.use_cases.stream_book_status import StreamBookStatusUseCase
+from core.application.use_cases.stream_position_events import (
+	StreamPositionEventsUseCase,
+)
+from core.domain.errors import BookNotFoundError, BookProcessingError, CoverNotFoundError
 
 router = APIRouter(prefix="/ebooks", tags=["ebooks"])
-
-STATUS_HEARTBEAT_SECONDS = 15.0
-SSE_HEADERS = {
-	"Cache-Control": "no-cache",
-	"Connection": "keep-alive",
-	"X-Accel-Buffering": "no",
-}
-
-
-def _status_response(book: LibraryBook) -> EbookStatusResponse:
-	return EbookStatusResponse(
-		book_id=book.book_id,
-		document_hash=book.document_hash,
-		processing_status=book.processing_status,
-		progress_position=book.progress_position,
-		processing_error=book.processing_error,
-		cover_url=f"/api/v1/ebooks/{book.book_id}/cover" if book.cover_path else None,
-		added_at=book.added_at,
-		last_synced_at=book.last_synced_at,
-		title=book.title,
-		author=book.author,
-	)
 
 
 @router.get("", response_model=EbookListResponse)
 async def list_ebooks(
 	owner_id: str = Depends(get_current_owner),
-	library: LibraryRepository = Depends(get_library_repository),
+	use_case: ListEbooksUseCase = Depends(get_list_ebooks_use_case),
 ) -> EbookListResponse:
-	books = await library.list_books(owner_id)
-	return EbookListResponse(books=[_status_response(book) for book in books])
+	books = await use_case.execute(owner_id)
+	return book_list_response(books)
 
 
 @router.get(
@@ -77,12 +66,15 @@ async def list_ebooks(
 async def get_ebook_status(
 	book_id: str,
 	owner_id: str = Depends(get_current_owner),
-	library: LibraryRepository = Depends(get_library_repository),
+	use_case: GetEbookStatusUseCase = Depends(get_ebook_status_use_case),
 ) -> EbookStatusResponse:
-	book = await library.get_book(owner_id, book_id)
-	if book is None:
-		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-	return _status_response(book)
+	try:
+		book = await use_case.execute(owner_id, book_id)
+	except BookNotFoundError as error:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND, detail="Book not found"
+		) from error
+	return book_status_response(book)
 
 
 @router.post("", response_model=EbookUploadResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -104,29 +96,20 @@ async def upload_ebook(
 			detail=str(error),
 		) from error
 
-	return EbookUploadResponse(
-		book_id=result.book_id,
-		document_hash=result.document_hash,
-		processing_status=result.processing_status,
-	)
+	return upload_response(result)
 
 
 @router.post("/{book_id}/retry", status_code=status.HTTP_202_ACCEPTED)
 async def retry_ebook(
 	book_id: str,
 	owner_id: str = Depends(get_current_owner),
-	library: LibraryRepository = Depends(get_library_repository),
 	use_case: RetryEbookUseCase = Depends(get_retry_ebook_use_case),
 ) -> EbookUploadResponse:
-	if await library.get_book(owner_id, book_id) is None:
-		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-
 	try:
-		result: RetryResult = await use_case.execute(book_id)
-	except RetryBookNotFoundError as error:
+		result = await use_case.execute(owner_id, book_id)
+	except BookNotFoundError as error:
 		raise HTTPException(
-			status_code=status.HTTP_404_NOT_FOUND,
-			detail=str(error),
+			status_code=status.HTTP_404_NOT_FOUND, detail="Book not found"
 		) from error
 	except BookNotRetryableError as error:
 		raise HTTPException(
@@ -134,11 +117,7 @@ async def retry_ebook(
 			detail=str(error),
 		) from error
 
-	return EbookUploadResponse(
-		book_id=result.book_id,
-		document_hash="",
-		processing_status=result.processing_status,
-	)
+	return retry_response(result)
 
 
 @router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -163,142 +142,40 @@ async def delete_ebook(
 async def book_position_events(
 	book_id: str,
 	owner_id: str = Depends(get_current_owner),
-	library: LibraryRepository = Depends(get_library_repository),
+	use_case: StreamPositionEventsUseCase = Depends(get_stream_position_events_use_case),
 ) -> StreamingResponse:
-	if await library.get_book(owner_id, book_id) is None:
-		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-
-	from lib.events import subscribe, unsubscribe
-
-	async def event_generator():
-		queue = await subscribe(owner_id, book_id)
-		try:
-			while True:
-				event = await queue.get()
-				yield f"data: {json.dumps(event)}\n\n"
-		except asyncio.CancelledError:
-			pass
-		finally:
-			unsubscribe(owner_id, book_id, queue)
-
-	return StreamingResponse(
-		event_generator(),
-		media_type="text/event-stream",
-		headers={
-			"Cache-Control": "no-cache",
-			"Connection": "keep-alive",
-		},
-	)
+	try:
+		events = await use_case.execute(owner_id, book_id)
+	except BookNotFoundError as error:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND, detail="Book not found"
+		) from error
+	return position_stream_response(events)
 
 
 @router.get("/{book_id}/cover")
 async def get_book_cover(
 	book_id: str,
 	owner_id: str = Depends(get_current_owner),
-	library: LibraryRepository = Depends(get_library_repository),
+	use_case: GetBookCoverUseCase = Depends(get_book_cover_use_case),
 ) -> FileResponse:
-	book = await library.get_book(owner_id, book_id)
-	if book is None or not book.cover_path:
-		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover not found")
-	cover_path = Path(book.cover_path)
-	if not cover_path.exists():
-		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover file not found")
-	return FileResponse(
-		cover_path,
-		media_type=_cover_media_type(cover_path),
-		headers={"Cache-Control": "private, max-age=3600"},
-	)
-
-
-def _cover_media_type(path: Path) -> str:
-	with path.open("rb") as stream:
-		header = stream.read(12)
-	if header.startswith(b"\x89PNG\r\n\x1a\n"):
-		return "image/png"
-	if header.startswith(b"GIF8"):
-		return "image/gif"
-	if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
-		return "image/webp"
-	return "image/jpeg"
-
-
-def _status_event(status: str, error: str | None) -> str:
-	return f"data: {json.dumps({'type': 'status', 'status': status, 'error': error})}\n\n"
-
-
-def _error_event(message: str) -> str:
-	return f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
-
-
-def _single_event_response(event: str) -> StreamingResponse:
-	async def event_generator():
-		yield "retry: 5000\n\n"
-		yield event
-
-	return StreamingResponse(
-		event_generator(),
-		media_type="text/event-stream",
-		headers=SSE_HEADERS,
-	)
-
-
-async def _status_updates(
-	subscription: BookStatusSubscription,
-	initial_status: str,
-	initial_error: str | None,
-):
 	try:
-		yield "retry: 5000\n\n"
-		yield _status_event(initial_status, initial_error)
-		while True:
-			event = await subscription.get(STATUS_HEARTBEAT_SECONDS)
-			if event is None:
-				yield ": keep-alive\n\n"
-				continue
-			yield _status_event(event.status, event.error)
-			if event.status in TERMINAL_STATUSES:
-				break
-	finally:
-		await subscription.aclose()
+		cover_path = await use_case.execute(owner_id, book_id)
+	except CoverNotFoundError as error:
+		raise HTTPException(
+			status_code=status.HTTP_404_NOT_FOUND, detail=str(error)
+		) from error
+	return cover_response(cover_path)
 
 
 @router.get("/{book_id}/events")
 async def book_events(
 	book_id: str,
 	owner_id: str = Depends(get_current_owner),
-	open_library: LibraryRepositoryFactory = Depends(get_library_repository_factory),
-	statuses: BookStatusSubscriber = Depends(get_book_status_subscriber),
+	use_case: StreamBookStatusUseCase = Depends(get_stream_book_status_use_case),
 ) -> StreamingResponse:
-	async with open_library() as library:
-		book = await library.get_book(owner_id, book_id)
-		if book is None:
-			return _single_event_response(_error_event("Book not found"))
-		if book.processing_status in TERMINAL_STATUSES:
-			return _single_event_response(
-				_status_event(book.processing_status, book.processing_error)
-			)
-
-		subscription = await statuses.subscribe(book_id)
-		try:
-			latest = await library.get_book(owner_id, book_id)
-		except Exception:
-			await subscription.aclose()
-			raise
-
-		if latest is None:
-			await subscription.aclose()
-			return _single_event_response(_error_event("Book not found"))
-		if latest.processing_status in TERMINAL_STATUSES:
-			await subscription.aclose()
-			return _single_event_response(
-				_status_event(latest.processing_status, latest.processing_error)
-			)
-
-		initial_status = latest.processing_status
-		initial_error = latest.processing_error
-
-	return StreamingResponse(
-		_status_updates(subscription, initial_status, initial_error),
-		media_type="text/event-stream",
-		headers=SSE_HEADERS,
-	)
+	try:
+		events = await use_case.execute(owner_id, book_id)
+	except BookNotFoundError:
+		return error_event_response("Book not found")
+	return status_stream_response(events)

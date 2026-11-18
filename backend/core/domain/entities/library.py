@@ -18,6 +18,8 @@ class LibraryBook:
     last_synced_at: datetime | None
     title: str | None = None
     author: str | None = None
+    chunks_total: int = 0
+    chunks_extracted: int = 0
 
 
 @dataclass(frozen=True)

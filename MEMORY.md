@@ -13,6 +13,7 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 - The graph is refreshed by reading progress. A sync that advances the stored position makes newly visible knowledge available; a sync with no new data changes nothing.
 - Ports and concrete implementations use distinct names. Concrete adapters name their backend, such as `PostgresBookRepository`; ports stay provider-agnostic.
 - `api/dependencies.py` is the composition root. Providers return ports and build adapters internally, so routers and use cases never name Postgres or an external vendor.
+- HTTP modules delegate: routers only parse the request, call one use case, map domain errors to HTTP, and return a presenter result. Response assembly lives in `api/presenters/`, streaming encoding and SSE framing live there too, and every multi-step request flow (streams, ownership checks, cover lookup) is a use case rather than route code.
 - Repeated reads on a long-lived session must be refresh-safe. Repositories project fresh dataclasses instead of replaying ORM entities from the identity map.
 - Processing status is push-based: the worker publishes each committed transition to Redis `book-status:{book_id}` and `/events` waits for subscription acknowledgement before re-reading the row, so a terminal event cannot be missed. No database polling; heartbeat every 15 seconds; close on `ready`, `failed`, or `partial`.
 - `LibraryRepositoryFactory` gives the status stream a short-lived session for authorization and the current status; the stream itself holds no database session.
@@ -63,6 +64,7 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 - Reprocessing a book deletes its RAG index before `replace_derived_content`.
 - `build_rag_index` is a separate ARQ job queued by `generate_graph`. The graph job remains non-fatal; queueing failures are logged. `BuildRagIndexUseCase` records permanent failures without re-raising, marks quota exhaustion `pending` and defers, and re-raises transient failures so ARQ retries.
 - Postgres uses the `pgvector/pgvector:pg16` image in Compose and CI; the migration creates the `vector` extension.
+- Foreign keys do not create indexes in PostgreSQL. `chunks` lookups are already served by its unique `(book_id, chunk_index)` index, so no single-column `book_id` index is added there. `chapters.book_id` and `rag_community_runs.book_id` have explicit indexes because they are deleted or filtered by book. There is no vector index on `rag_embeddings.embedding`: chat filters by `book_id` and `model` and ranks a single book's rows, so an approximate index would not pay off yet.
 
 ## Chat
 
@@ -90,6 +92,8 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 - CI e2e must not call a real LLM. `docker-compose.e2e.yml` selects `MockLLMProvider` with `LLM_PROVIDER=mock` and `ALLOW_MOCK_LLM=true`; the worker refuses mock mode unless both are set. The mock returns empty results for every requested chunk and no resolution groups.
 - The base worker `env_file` is optional so a CI checkout without the gitignored `backend/.env` can start. The normal Compose path still loads it when present.
 - Extraction counts are logged; an incomplete reason is stored as the book's processing error.
+- Extraction is resumable: `chunks.extracted_at` is set in the same transaction as the chunk's knowledge, so a retry reuses the stored chunks and extracts only the ones still null, without re-parsing the EPUB or deleting derived content.
+- Processing progress is `chunks_extracted / chunks_total`. The status response and every status SSE event carry both counts once chunks exist, and the worker publishes them after each extracted batch. The library grid renders that live percentage; counts stay absent until the book has been chunked.
 
 ## Reading Position
 

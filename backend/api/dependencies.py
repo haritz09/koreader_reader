@@ -1,6 +1,6 @@
 """FastAPI dependency providers."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adapters.auth.jwt_tokens import JwtTokenService
+from adapters.events.in_memory_position_events import InMemoryPositionEvents
 from adapters.events.redis_book_status import RedisBookStatusSubscriber
 from adapters.koreader.progress_provider import KoreaderProgressAdapter
 from adapters.provider_factory import build_embedding_provider, build_llm_provider
@@ -17,11 +18,21 @@ from adapters.queue.arq_queue import ArqEbookProcessingQueue
 from adapters.rate_limit.redis_rate_limiter import RedisRateLimiter
 from adapters.storage.epub_parser import EpubParser
 from adapters.storage.local_ebook_storage import LocalEbookStorage
+from core.application.use_cases.browse_library import (
+	GetEbookStatusUseCase,
+	ListEbooksUseCase,
+)
 from core.application.use_cases.create_session import CreateAnonymousSessionUseCase
 from core.application.use_cases.delete_ebook import DeleteEbookUseCase
+from core.application.use_cases.get_book_cover import GetBookCoverUseCase
 from core.application.use_cases.get_book_graph import GetBookGraphUseCase
 from core.application.use_cases.process_ebook import UploadEbookUseCase
+from core.application.use_cases.read_session import ReadSessionUseCase
 from core.application.use_cases.retry_ebook import RetryEbookUseCase
+from core.application.use_cases.stream_book_status import StreamBookStatusUseCase
+from core.application.use_cases.stream_position_events import (
+	StreamPositionEventsUseCase,
+)
 from core.application.use_cases.sync_progress import SyncProgressUseCase
 from core.config import settings
 from core.ports.book_repository import BookRepository
@@ -32,6 +43,7 @@ from core.ports.graph_repository import GraphRepository
 from core.ports.job_queue import EbookProcessingQueue, GraphGenerationQueue
 from core.ports.knowledge_repository import KnowledgeRepository
 from core.ports.library_repository import LibraryRepository, LibraryRepositoryFactory
+from core.ports.position_events import PositionEvents
 from core.ports.rate_limiter import RateLimiter
 from core.ports.reading_progress_provider import ReadingProgressProvider
 from core.ports.token_service import TokenService
@@ -107,11 +119,40 @@ def get_library_repository_factory() -> LibraryRepositoryFactory:
 	"""
 
 	@asynccontextmanager
-	async def open_library_repository() -> AsyncIterator[LibraryRepository]:
+	async def open_library_repository() -> AsyncGenerator[LibraryRepository, None]:
 		async with session_factory() as session:
 			yield PostgresLibraryRepository(session)
 
 	return open_library_repository
+
+
+def get_list_ebooks_use_case(
+	library: LibraryRepository = Depends(get_library_repository),
+) -> ListEbooksUseCase:
+	return ListEbooksUseCase(library)
+
+
+def get_ebook_status_use_case(
+	library: LibraryRepository = Depends(get_library_repository),
+) -> GetEbookStatusUseCase:
+	return GetEbookStatusUseCase(library)
+
+
+def get_book_cover_use_case(
+	library: LibraryRepository = Depends(get_library_repository),
+) -> GetBookCoverUseCase:
+	return GetBookCoverUseCase(library)
+
+
+def get_position_events() -> PositionEvents:
+	return InMemoryPositionEvents()
+
+
+def get_stream_position_events_use_case(
+	library: LibraryRepository = Depends(get_library_repository),
+	events: PositionEvents = Depends(get_position_events),
+) -> StreamPositionEventsUseCase:
+	return StreamPositionEventsUseCase(library, events)
 
 
 def get_token_service() -> TokenService:
@@ -130,6 +171,13 @@ def get_rate_limiter() -> RateLimiter:
 @lru_cache
 def get_book_status_subscriber() -> BookStatusSubscriber:
 	return RedisBookStatusSubscriber(settings.redis_url)
+
+
+def get_stream_book_status_use_case(
+	open_library: LibraryRepositoryFactory = Depends(get_library_repository_factory),
+	statuses: BookStatusSubscriber = Depends(get_book_status_subscriber),
+) -> StreamBookStatusUseCase:
+	return StreamBookStatusUseCase(open_library, statuses)
 
 
 def _caller_ip(request: Request) -> str:
@@ -186,6 +234,12 @@ def get_create_session_use_case(
 	return CreateAnonymousSessionUseCase(users)
 
 
+def get_read_session_use_case(
+	users: UserRepository = Depends(get_user_repository),
+) -> ReadSessionUseCase:
+	return ReadSessionUseCase(users)
+
+
 def get_delete_ebook_use_case(
 	library: LibraryRepository = Depends(get_library_repository),
 ) -> DeleteEbookUseCase:
@@ -239,8 +293,9 @@ def get_upload_ebook_use_case(
 def get_retry_ebook_use_case(
 	book_repository: BookRepository = Depends(get_book_repository),
 	queue: EbookProcessingQueue = Depends(get_ebook_processing_queue),
+	library: LibraryRepository = Depends(get_library_repository),
 ) -> RetryEbookUseCase:
-	return RetryEbookUseCase(book_repository, queue)
+	return RetryEbookUseCase(book_repository, queue, library)
 
 
 def get_rag_index_reader(

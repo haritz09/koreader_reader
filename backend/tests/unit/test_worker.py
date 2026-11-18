@@ -5,6 +5,7 @@ import pytest
 import workers.worker as worker_module
 from core.config import settings
 from core.domain.entities.chapter import Chapter
+from core.domain.entities.chunk import Chunk
 from core.ports.llm_provider import LLMConfigurationError, LLMQuotaExhaustedError
 from core.services.knowledge_extraction import ExtractionSummary
 
@@ -18,8 +19,16 @@ class FakeSessionContext:
 
 
 class FakeRepository:
-	def __init__(self, replace_error: Exception | None = None) -> None:
+	def __init__(
+		self,
+		replace_error: Exception | None = None,
+		*,
+		chunk_count: int = 0,
+		pending: list[tuple[str, Chunk]] | None = None,
+	) -> None:
 		self.replace_error = replace_error
+		self.chunk_count = chunk_count
+		self.pending = list(pending or [])
 		self.calls: list[tuple[str, str]] = []
 
 	async def mark_processing(self, book_id: str) -> None:
@@ -29,6 +38,10 @@ class FakeRepository:
 		if self.replace_error is not None:
 			raise self.replace_error
 		self.calls.append(("replace", book_id))
+		self.chunk_count = len(chunks)
+		self.pending = [
+			(f"chunk-{index}", chunk) for index, chunk in enumerate(chunks)
+		]
 
 	async def mark_ready(self, book_id: str) -> None:
 		self.calls.append(("ready", book_id))
@@ -39,12 +52,15 @@ class FakeRepository:
 	async def mark_partial(self, book_id: str, error: str) -> None:
 		self.calls.append(("partial", book_id))
 
-	async def get_chunk_ids_by_book(self, book_id: str) -> list[tuple[str, int]]:
-		return []
+	async def count_chunks(self, book_id: str) -> int:
+		return self.chunk_count
+
+	async def get_pending_chunks(self, book_id: str) -> list[tuple[str, Chunk]]:
+		return list(self.pending)
 
 
 class FakeKnowledgeRepository:
-	async def insert_batch(self, book_id, result) -> None:
+	async def insert_batch(self, book_id, chunk_id, result) -> None:
 		pass
 
 
@@ -121,6 +137,22 @@ class FakeGraphQueue:
 		self.enqueued.append(book_id)
 
 
+class FakePublisher:
+	def __init__(self) -> None:
+		self.calls: list[tuple[str, str | None, int | None, int | None]] = []
+
+	async def publish(
+		self,
+		book_id: str,
+		status: str,
+		error: str | None = None,
+		*,
+		chunks_total: int | None = None,
+		chunks_extracted: int | None = None,
+	) -> None:
+		self.calls.append((status, error, chunks_total, chunks_extracted))
+
+
 class FakeRagQueue:
 	def __init__(self) -> None:
 		self.enqueued: list[tuple[str, int, str]] = []
@@ -146,8 +178,10 @@ class FakeParser:
 	def __init__(self, chapters, error: Exception | None = None) -> None:
 		self.chapters = chapters
 		self.error = error
+		self.parsed: list[str] = []
 
 	async def parse(self, storage_path: str):
+		self.parsed.append(storage_path)
 		if self.error is not None:
 			raise self.error
 		return self.chapters
@@ -195,11 +229,17 @@ class QuotaEmbeddings(FakeEmbeddings):
 class FakeExtraction:
 	def __init__(self, error: Exception | None = None) -> None:
 		self.error = error
+		self.received: list[list] = []
 
-	async def extract_from_chunks(self, book_id, chunks) -> ExtractionSummary:
+	async def extract_from_chunks(
+		self, book_id, chunks, on_progress=None
+	) -> ExtractionSummary:
+		self.received.append(list(chunks))
 		if self.error is not None:
 			raise self.error
-		return ExtractionSummary(0, 0, 0, 0, 0, 0, 0)
+		if on_progress is not None:
+			await on_progress(len(chunks))
+		return ExtractionSummary(len(chunks), len(chunks), 0, 0, 0, 0, 0)
 
 
 def make_ctx(
@@ -211,6 +251,7 @@ def make_ctx(
 	extraction: FakeExtraction | None = None,
 	graph_queue: FakeGraphQueue | None = None,
 	rag_queue: FakeRagQueue | None = None,
+	publisher: FakePublisher | None = None,
 ) -> dict:
 	if chapters is None:
 		chapters = [Chapter("chapter", "Chapter", "one two three", 0)]
@@ -222,7 +263,7 @@ def make_ctx(
 		"storage": storage,
 		"llm_provider": FakeLLM(),
 		"embedding_provider": FakeEmbeddings(),
-		"status_publisher": None,
+		"status_publisher": publisher,
 		"session_factory": lambda: FakeSessionContext(),
 		"book_repository_factory": lambda session: repository,
 		"knowledge_repository_factory": lambda session: FakeKnowledgeRepository(),
@@ -273,7 +314,6 @@ def test_worker_marks_unretryable_llm_failures_failed(error) -> None:
 	repository = FakeRepository()
 	ctx = make_ctx(
 		repository,
-		chapters=[],
 		extraction=FakeExtraction(error),
 	)
 
@@ -288,10 +328,12 @@ def test_worker_marks_unretryable_llm_failures_failed(error) -> None:
 
 def test_worker_marks_incomplete_extraction_partial_and_keeps_source() -> None:
 	repository = FakeRepository()
-	ctx = make_ctx(repository, chapters=[])
+	ctx = make_ctx(repository)
 
 	class PartialExtraction(FakeExtraction):
-		async def extract_from_chunks(self, book_id, chunks) -> ExtractionSummary:
+		async def extract_from_chunks(
+			self, book_id, chunks, on_progress=None
+		) -> ExtractionSummary:
 			return ExtractionSummary(2, 1, 1, 0, 0, 0, 0)
 
 	ctx["extraction_service_factory"] = lambda provider, repo: PartialExtraction()
@@ -315,6 +357,71 @@ def test_worker_clears_the_previous_rag_index_before_replacing_content() -> None
 
 	assert rag_repository.deleted == ["book-123"]
 	assert repository.calls[-1] == ("ready", "book-123")
+
+
+def test_worker_reports_extraction_progress_against_the_whole_book() -> None:
+	chunk = Chunk(
+		chapter_id="chapter",
+		chunk_index=4,
+		text="pending text",
+		start_pctg=0.5,
+		end_pctg=0.6,
+	)
+	repository = FakeRepository(chunk_count=5, pending=[("chunk-4", chunk)])
+	publisher = FakePublisher()
+	ctx = make_ctx(repository, publisher=publisher)
+
+	asyncio.run(worker_module.process_ebook(ctx, "book-123", "books/book-123.epub"))
+
+	assert publisher.calls == [
+		("processing", None, None, None),
+		("processing", None, 5, 4),
+		("processing", None, 5, 5),
+		("ready", None, 5, 5),
+	]
+
+
+def test_worker_resumes_with_only_pending_chunks_without_parsing_again() -> None:
+	chunk = Chunk(
+		chapter_id="chapter",
+		chunk_index=4,
+		text="pending text",
+		start_pctg=0.5,
+		end_pctg=0.6,
+	)
+	repository = FakeRepository(chunk_count=5, pending=[("chunk-4", chunk)])
+	extraction = FakeExtraction()
+	ctx = make_ctx(repository, extraction=extraction)
+
+	asyncio.run(worker_module.process_ebook(ctx, "book-123", "books/book-123.epub"))
+
+	assert ctx["parser"].parsed == []
+	assert ("replace", "book-123") not in repository.calls
+	assert extraction.received == [[("chunk-4", chunk)]]
+	assert repository.calls == [
+		("processing", "book-123"),
+		("ready", "book-123"),
+	]
+
+
+def test_worker_keeps_previous_chunks_partial_when_resume_extraction_fails() -> None:
+	chunk = Chunk(
+		chapter_id="chapter",
+		chunk_index=4,
+		text="pending text",
+		start_pctg=0.5,
+		end_pctg=0.6,
+	)
+	repository = FakeRepository(chunk_count=5, pending=[("chunk-4", chunk)])
+	ctx = make_ctx(
+		repository,
+		extraction=FakeExtraction(LLMQuotaExhaustedError("quota exhausted", 3600)),
+	)
+
+	asyncio.run(worker_module.process_ebook(ctx, "book-123", "books/book-123.epub"))
+
+	assert repository.calls[-1] == ("partial", "book-123")
+	assert ctx["_storage"].deleted == []
 
 
 def test_worker_settings_registers_every_job() -> None:

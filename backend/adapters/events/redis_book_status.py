@@ -14,6 +14,10 @@ def _channel(book_id: str) -> str:
 	return f"{_CHANNEL_PREFIX}{book_id}"
 
 
+def _optional_int(value: object) -> int | None:
+	return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 class RedisBookStatusPublisher:
 	def __init__(self, redis_url: str) -> None:
 		self._redis = Redis.from_url(redis_url)
@@ -23,11 +27,15 @@ class RedisBookStatusPublisher:
 		book_id: str,
 		status: str,
 		error: str | None = None,
+		*,
+		chunks_total: int | None = None,
+		chunks_extracted: int | None = None,
 	) -> None:
-		await self._redis.publish(
-			_channel(book_id),
-			json.dumps({"status": status, "error": error}),
-		)
+		payload: dict[str, object] = {"status": status, "error": error}
+		if chunks_total is not None and chunks_extracted is not None:
+			payload["chunks_total"] = chunks_total
+			payload["chunks_extracted"] = chunks_extracted
+		await self._redis.publish(_channel(book_id), json.dumps(payload))
 
 	async def aclose(self) -> None:
 		await self._redis.aclose()
@@ -62,6 +70,8 @@ class RedisBookStatusSubscription:
 		return BookStatusEvent(
 			status=status,
 			error=error if isinstance(error, str) else None,
+			chunks_total=_optional_int(payload.get("chunks_total")),
+			chunks_extracted=_optional_int(payload.get("chunks_extracted")),
 		)
 
 	async def aclose(self) -> None:

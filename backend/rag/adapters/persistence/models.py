@@ -61,7 +61,7 @@ class RagCommunityRunRecord(Base):
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     book_id: Mapped[str] = mapped_column(
-        ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
     )
     graph_revision: Mapped[int] = mapped_column(Integer, nullable=False)
     algorithm: Mapped[str] = mapped_column(String(64), nullable=False)
