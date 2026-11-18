@@ -50,9 +50,7 @@ class FakeBookRepository:
     async def mark_pending(self, book_id: str) -> None:
         self.pending.append(book_id)
 
-    async def set_metadata(
-        self, book_id: str, title: str | None, author: str | None
-    ) -> None:
+    async def set_metadata(self, book_id: str, title: str | None, author: str | None) -> None:
         self.metadata.append((book_id, title, author))
 
 
@@ -90,9 +88,7 @@ def test_upload_stores_md5_and_enqueues_processing() -> None:
     storage = FakeStorage()
     queue = FakeQueue()
     library = FakeLibraryRepository()
-    use_case = UploadEbookUseCase(
-        repository, storage, queue, library, FakeMetadataReader()
-    )
+    use_case = UploadEbookUseCase(repository, storage, queue, library, FakeMetadataReader())
 
     result = asyncio.run(use_case.execute(content, "owner-1"))
 
@@ -121,9 +117,7 @@ def test_upload_reuses_existing_book_without_reprocessing() -> None:
     storage = FakeStorage()
     queue = FakeQueue()
     library = FakeLibraryRepository()
-    use_case = UploadEbookUseCase(
-        repository, storage, queue, library, FakeMetadataReader()
-    )
+    use_case = UploadEbookUseCase(repository, storage, queue, library, FakeMetadataReader())
 
     content = valid_epub_bytes()
     repository.existing.document_hash = hashlib.md5(content).hexdigest()
@@ -152,9 +146,7 @@ def test_reuploading_a_failed_book_reprocesses_it_in_place() -> None:
     storage = FakeStorage()
     queue = FakeQueue()
     library = FakeLibraryRepository()
-    use_case = UploadEbookUseCase(
-        repository, storage, queue, library, FakeMetadataReader()
-    )
+    use_case = UploadEbookUseCase(repository, storage, queue, library, FakeMetadataReader())
 
     content = valid_epub_bytes()
     repository.existing.document_hash = hashlib.md5(content).hexdigest()

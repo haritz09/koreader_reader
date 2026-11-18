@@ -19,8 +19,7 @@ def test_chunking_uses_global_indexes_and_overlapping_ranges() -> None:
     assert chunks[0].end_pctg > chunks[1].start_pctg
     assert all(0.0 <= chunk.start_pctg <= chunk.end_pctg <= 1.0 for chunk in chunks)
     assert all(
-        chunks[index].start_pctg <= chunks[index + 1].start_pctg
-        for index in range(len(chunks) - 1)
+        chunks[index].start_pctg <= chunks[index + 1].start_pctg for index in range(len(chunks) - 1)
     )
 
 

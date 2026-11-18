@@ -103,13 +103,7 @@ def test_entity_importance_is_none_when_missing_or_invalid() -> None:
 
 
 def test_aliases_drop_the_name_itself_duplicates_and_blanks() -> None:
-    result = parse(
-        {
-            "entities": [
-                entity(aliases=["vin", "VIN", "  ", "Vine", "Vine"])
-            ]
-        }
-    )
+    result = parse({"entities": [entity(aliases=["vin", "VIN", "  ", "Vine", "Vine"])]})
 
     assert result["entities"][0].aliases == ("Vine",)
 
@@ -229,11 +223,7 @@ def test_a_per_day_quota_failure_is_not_treated_as_a_rate_limit() -> None:
                     {
                         "@type": "type.googleapis.com/google.rpc.QuotaFailure",
                         "violations": [
-                            {
-                                "quotaId": (
-                                    "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
-                                )
-                            }
+                            {"quotaId": ("GenerateRequestsPerDayPerProjectPerModel-FreeTier")}
                         ],
                     },
                     {
@@ -264,11 +254,7 @@ def test_a_list_wrapped_per_day_quota_failure_is_detected() -> None:
                         {
                             "@type": "type.googleapis.com/google.rpc.QuotaFailure",
                             "violations": [
-                                {
-                                    "quotaId": (
-                                        "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
-                                    )
-                                }
+                                {"quotaId": ("GenerateRequestsPerDayPerProjectPerModel-FreeTier")}
                             ],
                         },
                         {
@@ -299,11 +285,7 @@ def test_a_per_minute_quota_failure_stays_transient() -> None:
                     {
                         "@type": "type.googleapis.com/google.rpc.QuotaFailure",
                         "violations": [
-                            {
-                                "quotaId": (
-                                    "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
-                                )
-                            }
+                            {"quotaId": ("GenerateRequestsPerMinutePerProjectPerModel-FreeTier")}
                         ],
                     },
                     {

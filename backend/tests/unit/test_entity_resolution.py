@@ -16,17 +16,13 @@ class StubResolver:
         self._groups = list(groups)
         self.calls: list[list[EntityCandidate]] = []
 
-    async def resolve_group(
-        self, candidates: Sequence[EntityCandidate]
-    ) -> list[list[str]]:
+    async def resolve_group(self, candidates: Sequence[EntityCandidate]) -> list[list[str]]:
         self.calls.append(list(candidates))
         return [list(group) for group in self._groups]
 
 
 class FailingResolver:
-    async def resolve_group(
-        self, candidates: Sequence[EntityCandidate]
-    ) -> list[list[str]]:
+    async def resolve_group(self, candidates: Sequence[EntityCandidate]) -> list[list[str]]:
         raise RuntimeError("resolver unavailable")
 
 
@@ -43,9 +39,7 @@ class StubKnowledgeRepository:
     async def get_entity_candidates(self, book_id: str) -> list[EntityCandidate]:
         return list(self.candidates)
 
-    async def get_resolution(
-        self, book_id: str
-    ) -> Mapping[str, tuple[str | None, str | None]]:
+    async def get_resolution(self, book_id: str) -> Mapping[str, tuple[str | None, str | None]]:
         return dict(self.stored)
 
     async def apply_resolution(

@@ -41,24 +41,19 @@ def test_batch_request_shape_and_normalization() -> None:
 
     vectors = asyncio.run(run())
 
-    assert captured["url"].endswith(
-        "/models/gemini-embedding-001:batchEmbedContents"
-    )
+    assert captured["url"].endswith("/models/gemini-embedding-001:batchEmbedContents")
     assert captured["api_key"] == "secret"
     requests = captured["body"]["requests"]
     assert [request["content"]["parts"][0]["text"] for request in requests] == [
         "first",
         "second",
     ]
-    assert {request["model"] for request in requests} == {
-        "models/gemini-embedding-001"
-    }
+    assert {request["model"] for request in requests} == {"models/gemini-embedding-001"}
     assert {request["taskType"] for request in requests} == {"RETRIEVAL_DOCUMENT"}
     assert {request["outputDimensionality"] for request in requests} == {3}
     assert vectors == [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
     assert all(
-        math.isclose(math.sqrt(sum(value * value for value in vector)), 1.0)
-        for vector in vectors
+        math.isclose(math.sqrt(sum(value * value for value in vector)), 1.0) for vector in vectors
     )
 
 
@@ -119,17 +114,13 @@ def test_missing_api_key_is_a_configuration_error() -> None:
             )
             await provider.embed_documents(["text"])
 
-    with pytest.raises(
-        EmbeddingConfigurationError, match="Embedding API key is not configured"
-    ):
+    with pytest.raises(EmbeddingConfigurationError, match="Embedding API key is not configured"):
         asyncio.run(run())
 
 
 def test_server_errors_are_transient() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            503, headers={"Retry-After": "7"}, text="unavailable"
-        )
+        return httpx.Response(503, headers={"Retry-After": "7"}, text="unavailable")
 
     with pytest.raises(EmbeddingTransientError, match="failed \\(503\\)") as raised:
         run_against(handler)
@@ -161,9 +152,7 @@ def test_daily_quota_failure_is_not_transient() -> None:
             },
         )
 
-    with pytest.raises(
-        EmbeddingQuotaExhaustedError, match="daily quota exhausted"
-    ) as raised:
+    with pytest.raises(EmbeddingQuotaExhaustedError, match="daily quota exhausted") as raised:
         run_against(handler)
     assert raised.value.retry_after == 21600.0
 

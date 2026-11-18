@@ -55,9 +55,7 @@ class _FakeRetrievalRepository:
         query_embedding: Sequence[float],
         limit: int,
     ) -> list[RetrievedChunk]:
-        self.calls.append(
-            (book_id, position, model, list(query_embedding), limit)
-        )
+        self.calls.append((book_id, position, model, list(query_embedding), limit))
         return [item for item in self.chunks if item.reading_position <= position]
 
 
@@ -189,9 +187,7 @@ def test_unprocessed_book_raises_not_ready(status: str) -> None:
 
 @pytest.mark.parametrize("status", [RagIndexStatus.READY, RagIndexStatus.PARTIAL])
 def test_current_index_answers(status: RagIndexStatus) -> None:
-    use_case, _, _ = build_use_case(
-        index=_FakeIndexReader(RagIndexState(status, MODEL))
-    )
+    use_case, _, _ = build_use_case(index=_FakeIndexReader(RagIndexState(status, MODEL)))
 
     result = asyncio.run(use_case.execute("owner", "book", "question"))
 
@@ -212,9 +208,7 @@ def test_unusable_index_raises_before_embedding_or_answering(
     index_state: RagIndexState | None,
     reason: str,
 ) -> None:
-    use_case, repository, provider = build_use_case(
-        index=_FakeIndexReader(index_state)
-    )
+    use_case, repository, provider = build_use_case(index=_FakeIndexReader(index_state))
 
     with pytest.raises(RagIndexNotReadyError) as error:
         asyncio.run(use_case.execute("owner", "book", "question"))

@@ -28,9 +28,7 @@ class ArqRagIndexQueue:
                 book_id=book_id,
                 _job_id=job_id,
                 _defer_by=(
-                    timedelta(seconds=defer_by_seconds)
-                    if defer_by_seconds is not None
-                    else None
+                    timedelta(seconds=defer_by_seconds) if defer_by_seconds is not None else None
                 ),
             )
         finally:

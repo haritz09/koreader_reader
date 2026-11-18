@@ -34,33 +34,26 @@ def test_the_status_stream_reports_the_status_the_book_reached(
     with e2e_client.stream("GET", f"/api/v1/ebooks/{book_id}/events") as response:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
-        events = [
-            event for event in _status_events(response) if event["type"] == "status"
-        ]
+        events = [event for event in _status_events(response) if event["type"] == "status"]
 
     reported = e2e_client.get(f"/api/v1/ebooks/{book_id}").json()["processing_status"]
     assert events[-1]["status"] in {"ready", "failed"}
     assert events[-1]["status"] == reported
 
     postgres_connection.execute(
-        "UPDATE books SET processing_status = 'partial', processing_error = %s "
-        "WHERE id = %s",
+        "UPDATE books SET processing_status = 'partial', processing_error = %s WHERE id = %s",
         ("Some chunks could not be extracted", book_id),
     )
     postgres_connection.commit()
 
     with e2e_client.stream("GET", f"/api/v1/ebooks/{book_id}/events") as response:
-        partial_events = [
-            event for event in _status_events(response) if event["type"] == "status"
-        ]
+        partial_events = [event for event in _status_events(response) if event["type"] == "status"]
 
     total, extracted = postgres_connection.execute(
         "SELECT count(*), count(extracted_at) FROM chunks WHERE book_id = %s",
         (book_id,),
     ).fetchone()
-    progress = (
-        {"chunks_total": total, "chunks_extracted": extracted} if total else {}
-    )
+    progress = {"chunks_total": total, "chunks_extracted": extracted} if total else {}
 
     assert partial_events == [
         {

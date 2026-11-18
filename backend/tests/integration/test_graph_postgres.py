@@ -29,16 +29,12 @@ READY = "ready"
 
 
 class NeverCalledResolver:
-    async def resolve_group(
-        self, candidates: Sequence[EntityCandidate]
-    ) -> list[list[str]]:
+    async def resolve_group(self, candidates: Sequence[EntityCandidate]) -> list[list[str]]:
         raise AssertionError("the resolver should not be reached for exact name matches")
 
 
 class AliasResolver:
-    async def resolve_group(
-        self, candidates: Sequence[EntityCandidate]
-    ) -> list[list[str]]:
+    async def resolve_group(self, candidates: Sequence[EntityCandidate]) -> list[list[str]]:
         return [[candidate.entity_id for candidate in candidates]]
 
 
@@ -72,9 +68,7 @@ async def _seed_book(
         )
     )
     chapter_id = f"{book_id}-chapter-0"
-    session.add(
-        ChapterRecord(id=chapter_id, book_id=book_id, title="Chapter 1", chapter_index=0)
-    )
+    session.add(ChapterRecord(id=chapter_id, book_id=book_id, title="Chapter 1", chapter_index=0))
     chunk_ids: dict[int, str] = {}
     for index, position in enumerate(positions):
         chunk_id = f"{book_id}-chunk-{index}"
@@ -224,9 +218,7 @@ async def _apply(session: AsyncSession, book_id: str, resolver=None) -> bool:
 
 
 async def _build_graph(session: AsyncSession, book_id: str, position: float):
-    return await GraphAssemblyService(PostgresGraphRepository(session)).build(
-        book_id, position
-    )
+    return await GraphAssemblyService(PostgresGraphRepository(session)).build(book_id, position)
 
 
 def test_resolution_merges_mentions_of_the_same_name_across_chunks(
@@ -487,9 +479,7 @@ def test_the_graph_read_fails_closed_on_an_out_of_range_position(
 ) -> None:
     async def work(session: AsyncSession) -> None:
         chunk_ids = await _seed_book(session, "book-a", _POSITIONS)
-        await _add_entities(
-            session, "book-a", chunk_ids, [(0, "book-a-e1", "Alice", "character")]
-        )
+        await _add_entities(session, "book-a", chunk_ids, [(0, "book-a-e1", "Alice", "character")])
 
         with pytest.raises(InvalidReadingPositionError):
             await _build_graph(session, "book-a", position)
@@ -503,9 +493,7 @@ def test_knowledge_retrieval_fails_closed_on_an_out_of_range_position(
 ) -> None:
     async def work(session: AsyncSession) -> None:
         chunk_ids = await _seed_book(session, "book-a", _POSITIONS)
-        await _add_entities(
-            session, "book-a", chunk_ids, [(0, "book-a-e1", "Alice", "character")]
-        )
+        await _add_entities(session, "book-a", chunk_ids, [(0, "book-a-e1", "Alice", "character")])
         repository = PostgresKnowledgeRepository(session)
 
         for call in (
@@ -623,9 +611,7 @@ def test_places_and_events_reach_the_graph_as_their_own_node_types(
 
         graph = await _build_graph(session, "book-a", 1.0)
 
-        assert {
-            (node.node_id, node.node_type) for node in graph.nodes
-        } == {
+        assert {(node.node_id, node.node_type) for node in graph.nodes} == {
             ("book-a-l1", "location"),
             ("book-a-ev1", "event"),
         }
@@ -646,13 +632,19 @@ def test_places_and_events_are_hidden_beyond_the_requested_position(
             session,
             "book-a",
             chunk_ids,
-            [(0, "book-a-l1", "Luthadel", "seen early"), (2, "book-a-l2", "Kredik Shaw", "seen late")],
+            [
+                (0, "book-a-l1", "Luthadel", "seen early"),
+                (2, "book-a-l2", "Kredik Shaw", "seen late"),
+            ],
         )
         await _add_events(
             session,
             "book-a",
             chunk_ids,
-            [(1, "book-a-ev1", "The Siege", "seen early"), (2, "book-a-ev2", "The Fall", "seen late")],
+            [
+                (1, "book-a-ev1", "The Siege", "seen early"),
+                (2, "book-a-ev2", "The Fall", "seen late"),
+            ],
         )
 
         early = await _build_graph(session, "book-a", 0.5)
@@ -743,11 +735,15 @@ def test_entity_detail_columns_reach_the_graph_at_the_right_position(
         assert early.nodes[0].description == "A skaa street urchin."
         assert early.nodes[0].sub_type == "mistborn"
         assert early.nodes[0].aliases == ()
-        assert early.nodes[0].importance == 3, f"Expected importance 3, got {early.nodes[0].importance}"
+        assert early.nodes[0].importance == 3, (
+            f"Expected importance 3, got {early.nodes[0].importance}"
+        )
         assert late.nodes[0].description == "A skaa street urchin."
         assert late.nodes[0].sub_type == "mistborn"
         assert late.nodes[0].aliases == ("Reen's sister",)
-        assert late.nodes[0].importance == 1, f"Expected importance 1, got {late.nodes[0].importance}"
+        assert late.nodes[0].importance == 1, (
+            f"Expected importance 1, got {late.nodes[0].importance}"
+        )
 
     _run_against_postgres(work)
 
@@ -794,9 +790,7 @@ def test_every_vocabulary_value_round_trips_through_the_database(
         )
         await session.commit()
 
-        stored = await PostgresKnowledgeRepository(session).get_entities_by_book(
-            "book-a", 1.0
-        )
+        stored = await PostgresKnowledgeRepository(session).get_entities_by_book("book-a", 1.0)
         graph = await _build_graph(session, "book-a", 1.0)
 
         assert sorted(entity.entity_type for entity in stored) == names
@@ -810,9 +804,7 @@ def test_deleting_a_book_removes_its_places_and_events(
 ) -> None:
     async def work(session: AsyncSession) -> None:
         chunk_ids = await _seed_book(session, "book-a", _POSITIONS)
-        await _add_locations(
-            session, "book-a", chunk_ids, [(0, "book-a-l1", "Luthadel", "")]
-        )
+        await _add_locations(session, "book-a", chunk_ids, [(0, "book-a-l1", "Luthadel", "")])
         await _add_events(session, "book-a", chunk_ids, [(1, "book-a-ev1", "The Siege", "")])
 
         await PostgresGraphRepository(session).delete_by_book("book-a")

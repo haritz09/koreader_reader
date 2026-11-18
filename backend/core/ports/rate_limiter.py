@@ -14,5 +14,4 @@ class RateLimiter(Protocol):
         key: str,
         limit: int,
         window_seconds: int,
-    ) -> RateLimitDecision:
-        ...
+    ) -> RateLimitDecision: ...

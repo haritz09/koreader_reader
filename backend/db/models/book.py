@@ -8,18 +8,14 @@ from db.base import Base
 
 
 class Book(Base):
-	__tablename__ = "books"
+    __tablename__ = "books"
 
-	id: Mapped[str] = mapped_column(String(255), primary_key=True)
-	document_hash: Mapped[str] = mapped_column(
-		String(64), unique=True, index=True, nullable=False
-	)
-	storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
-	title: Mapped[str | None] = mapped_column(String(512))
-	author: Mapped[str | None] = mapped_column(String(512))
-	cover_path: Mapped[str | None] = mapped_column(String(512))
-	processing_status: Mapped[str] = mapped_column(
-		String(32), nullable=False, default=PENDING
-	)
-	processing_error: Mapped[str | None] = mapped_column(String(2000))
-	graph_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    document_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(512))
+    author: Mapped[str | None] = mapped_column(String(512))
+    cover_path: Mapped[str | None] = mapped_column(String(512))
+    processing_status: Mapped[str] = mapped_column(String(32), nullable=False, default=PENDING)
+    processing_error: Mapped[str | None] = mapped_column(String(2000))
+    graph_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

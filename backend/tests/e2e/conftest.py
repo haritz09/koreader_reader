@@ -12,9 +12,7 @@ def e2e_base_url() -> str:
 
 
 @pytest.fixture
-def e2e_client(
-    e2e_base_url: str, clean_postgres_database
-) -> Generator[httpx.Client, None, None]:
+def e2e_client(e2e_base_url: str, clean_postgres_database) -> Generator[httpx.Client, None, None]:
     """A client with a real anonymous session cookie.
 
     The database is truncated first, so the session created here belongs to a

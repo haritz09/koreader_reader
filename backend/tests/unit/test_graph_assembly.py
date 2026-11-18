@@ -26,9 +26,7 @@ class StubGraphRepository:
         self.requested_positions.append(reading_position)
         return [m for m in self.mentions if m.reading_position <= reading_position]
 
-    async def get_visible_facts(
-        self, book_id: str, reading_position: float
-    ) -> list[FactLink]:
+    async def get_visible_facts(self, book_id: str, reading_position: float) -> list[FactLink]:
         return [f for f in self.facts if f.reading_position <= reading_position]
 
     async def get_revision(self, book_id: str) -> int:
@@ -370,9 +368,7 @@ def test_an_event_can_be_the_endpoint_of_an_edge() -> None:
         1.0,
     )
 
-    assert [(edge.source_id, edge.target_id) for edge in graph.edges] == [
-        ("e1", "ev1")
-    ]
+    assert [(edge.source_id, edge.target_id) for edge in graph.edges] == [("e1", "ev1")]
 
 
 def test_a_node_description_comes_from_earliest_visible_mention() -> None:

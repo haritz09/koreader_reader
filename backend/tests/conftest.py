@@ -38,9 +38,7 @@ def _run(*command: str) -> str:
         timeout=COMPOSE_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
-        raise RuntimeError(
-            " ".join(command) + " failed: " + result.stderr.strip()
-        )
+        raise RuntimeError(" ".join(command) + " failed: " + result.stderr.strip())
     return result.stdout.strip()
 
 
@@ -75,10 +73,7 @@ def _quiesced_database(enabled: bool) -> Generator[None, None, None]:
 
 
 def _is_e2e(request: pytest.FixtureRequest) -> bool:
-    return (
-        os.getenv("RUN_E2E") == "1"
-        and request.node.get_closest_marker("e2e") is not None
-    )
+    return os.getenv("RUN_E2E") == "1" and request.node.get_closest_marker("e2e") is not None
 
 
 def _truncate_all_tables(conn: psycopg.Connection) -> None:

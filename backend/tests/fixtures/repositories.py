@@ -28,14 +28,10 @@ class FakeLibraryRepository:
         known_book_ids: Collection[str] | None = None,
     ) -> None:
         self.state = state
-        self.known_book_ids = (
-            None if known_book_ids is None else set(known_book_ids)
-        )
+        self.known_book_ids = None if known_book_ids is None else set(known_book_ids)
         self.updates: list[tuple[str, float]] = []
 
-    async def get_reading_state(
-        self, owner_id: str, book_id: str
-    ) -> ReadingState | None:
+    async def get_reading_state(self, owner_id: str, book_id: str) -> ReadingState | None:
         return self.state if self._knows(book_id) else None
 
     async def update_progress(

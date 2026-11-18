@@ -63,9 +63,7 @@ class _FakeRetrievalRepository:
         query_embedding: Sequence[float],
         limit: int,
     ) -> list[RetrievedChunk]:
-        self.calls.append(
-            (book_id, position, model, list(query_embedding), limit)
-        )
+        self.calls.append((book_id, position, model, list(query_embedding), limit))
         return list(self.chunks)
 
 

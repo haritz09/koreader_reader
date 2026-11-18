@@ -16,6 +16,4 @@ class EntityResolver(Protocol):
     coupled to the knowledge domain.
     """
 
-    async def resolve_group(
-        self, candidates: Sequence[EntityCandidate]
-    ) -> list[list[str]]: ...
+    async def resolve_group(self, candidates: Sequence[EntityCandidate]) -> list[list[str]]: ...

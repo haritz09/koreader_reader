@@ -74,9 +74,7 @@ def test_build_is_skipped_when_another_job_holds_the_claim() -> None:
 
 def test_daily_quota_marks_pending_and_defers() -> None:
     repository = FakeRepository()
-    embeddings = FakeEmbeddings(
-        EmbeddingQuotaExhaustedError("daily quota", 21600)
-    )
+    embeddings = FakeEmbeddings(EmbeddingQuotaExhaustedError("daily quota", 21600))
 
     with pytest.raises(RagBuildDeferred) as raised:
         asyncio.run(use_case(repository, embeddings).execute("book-1", 3))

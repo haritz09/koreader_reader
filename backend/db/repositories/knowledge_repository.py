@@ -30,41 +30,55 @@ class PostgresKnowledgeRepository:
     ) -> None:
         self._session.add_all(
             EntityRecord(
-                id=e.entity_id, book_id=e.book_id, chunk_id=e.chunk_id,
-                name=e.name, entity_type=e.entity_type, description=e.description,
-                sub_type=e.sub_type, aliases=list(e.aliases),
-                reading_position=e.reading_position, importance=e.importance,
+                id=e.entity_id,
+                book_id=e.book_id,
+                chunk_id=e.chunk_id,
+                name=e.name,
+                entity_type=e.entity_type,
+                description=e.description,
+                sub_type=e.sub_type,
+                aliases=list(e.aliases),
+                reading_position=e.reading_position,
+                importance=e.importance,
             )
             for e in result.entities
         )
         self._session.add_all(
             FactRecord(
-                id=f.fact_id, book_id=f.book_id, chunk_id=f.chunk_id,
-                statement=f.statement, subject=f.subject, object=f.object,
+                id=f.fact_id,
+                book_id=f.book_id,
+                chunk_id=f.chunk_id,
+                statement=f.statement,
+                subject=f.subject,
+                object=f.object,
                 reading_position=f.reading_position,
             )
             for f in result.facts
         )
         self._session.add_all(
             EventRecord(
-                id=ev.event_id, book_id=ev.book_id, chunk_id=ev.chunk_id,
-                name=ev.name, description=ev.description,
+                id=ev.event_id,
+                book_id=ev.book_id,
+                chunk_id=ev.chunk_id,
+                name=ev.name,
+                description=ev.description,
                 reading_position=ev.reading_position,
             )
             for ev in result.events
         )
         self._session.add_all(
             LocationRecord(
-                id=loc.location_id, book_id=loc.book_id, chunk_id=loc.chunk_id,
-                name=loc.name, description=loc.description,
+                id=loc.location_id,
+                book_id=loc.book_id,
+                chunk_id=loc.chunk_id,
+                name=loc.name,
+                description=loc.description,
                 reading_position=loc.reading_position,
             )
             for loc in result.locations
         )
         await self._session.execute(
-            update(ChunkRecord)
-            .where(ChunkRecord.id == chunk_id)
-            .values(extracted_at=func.now())
+            update(ChunkRecord).where(ChunkRecord.id == chunk_id).values(extracted_at=func.now())
         )
         await self._session.commit()
 
@@ -193,9 +207,7 @@ class PostgresKnowledgeRepository:
             for record_id, name, entity_type, reading_position in result.all()
         ]
 
-    async def get_resolution(
-        self, book_id: str
-    ) -> Mapping[str, tuple[str | None, str | None]]:
+    async def get_resolution(self, book_id: str) -> Mapping[str, tuple[str | None, str | None]]:
         result = await self._session.execute(
             select(
                 EntityRecord.id,
@@ -203,7 +215,9 @@ class PostgresKnowledgeRepository:
                 EntityRecord.resolution_method,
             ).where(EntityRecord.book_id == book_id)
         )
-        return {record_id: (canonical_id, method) for record_id, canonical_id, method in result.all()}
+        return {
+            record_id: (canonical_id, method) for record_id, canonical_id, method in result.all()
+        }
 
     async def apply_resolution(
         self,

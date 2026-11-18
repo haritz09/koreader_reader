@@ -47,9 +47,7 @@ class KnowledgeRepository(Protocol):
 
     async def get_entity_candidates(self, book_id: str) -> list[EntityCandidate]: ...
 
-    async def get_resolution(
-        self, book_id: str
-    ) -> Mapping[str, tuple[str | None, str | None]]: ...
+    async def get_resolution(self, book_id: str) -> Mapping[str, tuple[str | None, str | None]]: ...
 
     async def apply_resolution(
         self,

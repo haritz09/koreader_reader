@@ -65,24 +65,51 @@ def _service(
     repo: FakeKnowledgeRepository,
     **kwargs: object,
 ) -> KnowledgeExtractionService:
-    return KnowledgeExtractionService(
-        llm, repo, requests_per_minute=0, **kwargs
-    )
+    return KnowledgeExtractionService(llm, repo, requests_per_minute=0, **kwargs)
 
 
 def _extraction_result() -> KnowledgeExtractionResult:
     return KnowledgeExtractionResult(
         entities=[
-            Entity(entity_id="", book_id="", chunk_id="", name="Frodo", entity_type="character", reading_position=0.0),
+            Entity(
+                entity_id="",
+                book_id="",
+                chunk_id="",
+                name="Frodo",
+                entity_type="character",
+                reading_position=0.0,
+            ),
         ],
         facts=[
-            Fact(fact_id="", book_id="", chunk_id="", statement="Frodo found a ring", subject="Frodo", object="ring", reading_position=0.0),
+            Fact(
+                fact_id="",
+                book_id="",
+                chunk_id="",
+                statement="Frodo found a ring",
+                subject="Frodo",
+                object="ring",
+                reading_position=0.0,
+            ),
         ],
         events=[
-            Event(event_id="", book_id="", chunk_id="", name="The Fellowship forms", description="The quest began", reading_position=0.0),
+            Event(
+                event_id="",
+                book_id="",
+                chunk_id="",
+                name="The Fellowship forms",
+                description="The quest began",
+                reading_position=0.0,
+            ),
         ],
         locations=[
-            Location(location_id="", book_id="", chunk_id="", name="Shire", description="Green hills", reading_position=0.0),
+            Location(
+                location_id="",
+                book_id="",
+                chunk_id="",
+                name="Shire",
+                description="Green hills",
+                reading_position=0.0,
+            ),
         ],
     )
 
@@ -168,7 +195,12 @@ def test_extract_from_chunks_sets_reading_position_from_chunk() -> None:
         await service.extract_from_chunks("book-1", [("c1", chunk_with_pctg)])
 
         _, _, stored_result = repo.inserted[0]
-        for item in [*stored_result.entities, *stored_result.facts, *stored_result.events, *stored_result.locations]:
+        for item in [
+            *stored_result.entities,
+            *stored_result.facts,
+            *stored_result.events,
+            *stored_result.locations,
+        ]:
             assert item.reading_position == 0.35
 
     asyncio.run(_run())
@@ -208,9 +240,7 @@ def test_extract_from_chunks_retries_transient_failures() -> None:
                 self.call_count += 1
                 if self.call_count < 3:
                     raise LLMTransientError("rate limited")
-                return {
-                    chunk_id: _extraction_result() for chunk_id, _ in chunks
-                }
+                return {chunk_id: _extraction_result() for chunk_id, _ in chunks}
 
         llm = FlakyLLM()
         repo = FakeKnowledgeRepository()
@@ -270,9 +300,7 @@ def test_extract_from_chunks_returns_partial_when_quota_runs_out_after_success()
                 self.call_count += 1
                 if self.call_count == 2:
                     raise LLMQuotaExhaustedError("daily quota exhausted", 3600)
-                return {
-                    chunk_id: _extraction_result() for chunk_id, _ in chunks
-                }
+                return {chunk_id: _extraction_result() for chunk_id, _ in chunks}
 
         llm = QuotaLLM()
         repo = FakeKnowledgeRepository()
@@ -306,9 +334,7 @@ def test_extract_from_chunks_limits_concurrency() -> None:
                 self.max_active = max(self.max_active, self.active)
                 await asyncio.sleep(0.01)
                 self.active -= 1
-                return {
-                    chunk_id: _extraction_result() for chunk_id, _ in chunks
-                }
+                return {chunk_id: _extraction_result() for chunk_id, _ in chunks}
 
         llm = TrackingLLM()
         repo = FakeKnowledgeRepository()

@@ -12,9 +12,7 @@ class StubProgressProvider:
     def __init__(self, known_hash: str = "document-hash") -> None:
         self._known_hash = known_hash
 
-    async def resolve_progress(
-        self, document_hash: str, position: float
-    ) -> ReadingProgress | None:
+    async def resolve_progress(self, document_hash: str, position: float) -> ReadingProgress | None:
         if document_hash != self._known_hash:
             return None
         return ReadingProgress(book_id="book-1", position=position)

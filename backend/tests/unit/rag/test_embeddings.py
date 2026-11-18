@@ -54,9 +54,7 @@ class FakeProvider:
         self.calls.append(list(texts))
         if self.quota_failures:
             self.quota_failures -= 1
-            raise EmbeddingQuotaExhaustedError(
-                "daily quota", self.quota_retry_after
-            )
+            raise EmbeddingQuotaExhaustedError("daily quota", self.quota_retry_after)
         if self.failures:
             self.failures -= 1
             raise EmbeddingTransientError("temporary")
@@ -129,9 +127,7 @@ def test_transient_failure_is_retried() -> None:
     assert summary.reused == 0
     assert summary.skipped == 0
     assert provider.calls == [["text"], ["text"]]
-    assert repository.rows == [
-        (repository.sources[0], content_hash("text"), [1.0, 0.0])
-    ]
+    assert repository.rows == [(repository.sources[0], content_hash("text"), [1.0, 0.0])]
 
 
 @pytest.mark.parametrize(
@@ -143,9 +139,7 @@ def test_transient_failure_is_retried() -> None:
     ],
     ids=["count", "dimension", "non-finite"],
 )
-def test_invalid_provider_vectors_fail_without_writing_rows(
-    vectors, message
-) -> None:
+def test_invalid_provider_vectors_fail_without_writing_rows(vectors, message) -> None:
     class BrokenProvider(FakeProvider):
         async def embed_documents(self, texts):
             self.calls.append(list(texts))
@@ -160,9 +154,7 @@ def test_invalid_provider_vectors_fail_without_writing_rows(
     provider = BrokenProvider()
 
     with pytest.raises(EmbeddingError, match=message):
-        asyncio.run(
-            service(repository, provider, max_attempts=1).embed_book("book-1")
-        )
+        asyncio.run(service(repository, provider, max_attempts=1).embed_book("book-1"))
 
     assert provider.calls == [["one", "two"]]
     assert repository.rows == []
@@ -186,9 +178,7 @@ def test_identical_texts_are_embedded_once() -> None:
     assert summary.reused == 0
     assert summary.skipped == 0
     assert len(repository.rows) == 3
-    alice_vectors = {
-        tuple(row[2]) for row in repository.rows if row[0].source_id in {"e1", "e2"}
-    }
+    alice_vectors = {tuple(row[2]) for row in repository.rows if row[0].source_id in {"e1", "e2"}}
     assert alice_vectors == {(1.0, 0.0)}
     assert [row[0].source_id for row in repository.rows] == ["e1", "e2", "f1"]
     assert {row[1] for row in repository.rows} == {
@@ -213,9 +203,7 @@ def test_blank_texts_are_not_sent_to_the_provider() -> None:
     assert summary.embedded == 1
     assert summary.reused == 0
     assert summary.skipped == 1
-    assert repository.rows == [
-        (repository.sources[1], content_hash("Alice meets Bob"), [1.0, 0.0])
-    ]
+    assert repository.rows == [(repository.sources[1], content_hash("Alice meets Bob"), [1.0, 0.0])]
 
 
 def test_daily_quota_is_not_retried() -> None:
@@ -223,9 +211,7 @@ def test_daily_quota_is_not_retried() -> None:
     provider = FakeProvider(quota_failures=5, quota_retry_after=21600)
 
     with pytest.raises(EmbeddingQuotaExhaustedError) as raised:
-        asyncio.run(
-            service(repository, provider, max_attempts=3).embed_book("book-1")
-        )
+        asyncio.run(service(repository, provider, max_attempts=3).embed_book("book-1"))
 
     assert str(raised.value) == "daily quota"
     assert raised.value.retry_after == 21600
@@ -245,9 +231,7 @@ def test_batch_size_is_capped_by_the_provider() -> None:
     )
     provider = SingleTextProvider()
 
-    summary = asyncio.run(
-        service(repository, provider, batch_size=100).embed_book("book-1")
-    )
+    summary = asyncio.run(service(repository, provider, batch_size=100).embed_book("book-1"))
 
     assert provider.calls == [["one"], ["two"]]
     assert summary.embedded == 2

@@ -53,11 +53,7 @@ class LeidenCommunityDetector:
         weighted_graph.es["weight"] = weights
 
         partition = _partition(weighted_graph, parameters)
-        modularity = (
-            float(partition.modularity)
-            if parameters.objective == "modularity"
-            else None
-        )
+        modularity = float(partition.modularity) if parameters.objective == "modularity" else None
 
         communities: list[Community] = []
         _collect(
@@ -132,9 +128,7 @@ def _collect(
             )
         )
         first_seen_position = min(positions[node_id] for node_id in member_ids)
-        signature = hashlib.sha256(
-            f"{level}:{','.join(member_ids)}".encode()
-        ).hexdigest()
+        signature = hashlib.sha256(f"{level}:{','.join(member_ids)}".encode()).hexdigest()
         communities.append(
             Community(
                 community_id=community_id,
@@ -198,9 +192,7 @@ def _keep_sized_communities(
     communities: list[Community],
     min_members: int,
 ) -> list[Community]:
-    parents = {
-        community.parent_id for community in communities if community.parent_id is not None
-    }
+    parents = {community.parent_id for community in communities if community.parent_id is not None}
     return [
         community
         for community in communities

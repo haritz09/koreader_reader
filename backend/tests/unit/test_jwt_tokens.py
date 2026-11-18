@@ -32,9 +32,7 @@ def test_a_non_token_string_is_rejected() -> None:
 
 
 def test_an_expired_token_is_rejected() -> None:
-    tokens = JwtTokenService(
-        "test-secret-that-is-long-enough-32b", algorithm="HS256", ttl_days=-1
-    )
+    tokens = JwtTokenService("test-secret-that-is-long-enough-32b", algorithm="HS256", ttl_days=-1)
 
     assert tokens.verify(tokens.issue("owner-1")) is None
 

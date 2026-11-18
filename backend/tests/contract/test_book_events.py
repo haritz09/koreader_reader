@@ -109,9 +109,7 @@ def test_the_stream_reports_the_current_status_and_then_the_terminal_update() ->
 
 def test_the_stream_reports_the_failure_reason_when_processing_fails() -> None:
     library = ScriptedLibrary(["processing", "processing"])
-    subscriber = ScriptedSubscriber(
-        [BookStatusEvent("failed", error="extraction failed")]
-    )
+    subscriber = ScriptedSubscriber([BookStatusEvent("failed", error="extraction failed")])
     _use(library, subscriber)
 
     try:

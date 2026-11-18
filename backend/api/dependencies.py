@@ -19,8 +19,8 @@ from adapters.rate_limit.redis_rate_limiter import RedisRateLimiter
 from adapters.storage.epub_parser import EpubParser
 from adapters.storage.local_ebook_storage import LocalEbookStorage
 from core.application.use_cases.browse_library import (
-	GetEbookStatusUseCase,
-	ListEbooksUseCase,
+    GetEbookStatusUseCase,
+    ListEbooksUseCase,
 )
 from core.application.use_cases.create_session import CreateAnonymousSessionUseCase
 from core.application.use_cases.delete_ebook import DeleteEbookUseCase
@@ -31,7 +31,7 @@ from core.application.use_cases.read_session import ReadSessionUseCase
 from core.application.use_cases.retry_ebook import RetryEbookUseCase
 from core.application.use_cases.stream_book_status import StreamBookStatusUseCase
 from core.application.use_cases.stream_position_events import (
-	StreamPositionEventsUseCase,
+    StreamPositionEventsUseCase,
 )
 from core.application.use_cases.sync_progress import SyncProgressUseCase
 from core.config import settings
@@ -66,282 +66,278 @@ from rag.ports.retrieval_repository import RetrievalRepository
 
 
 def get_ebook_storage() -> EbookStorage:
-	return LocalEbookStorage(Path(settings.ebook_storage_path))
+    return LocalEbookStorage(Path(settings.ebook_storage_path))
 
 
 def get_ebook_metadata_reader() -> EbookMetadataReader:
-	return EpubParser()
+    return EpubParser()
 
 
 def get_ebook_processing_queue() -> EbookProcessingQueue:
-	return ArqEbookProcessingQueue(settings.redis_url)
+    return ArqEbookProcessingQueue(settings.redis_url)
 
 
 def get_graph_generation_queue() -> GraphGenerationQueue:
-	return ArqGraphGenerationQueue(settings.redis_url)
+    return ArqGraphGenerationQueue(settings.redis_url)
 
 
 def get_book_repository(
-	session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_db_session),
 ) -> BookRepository:
-	return PostgresBookRepository(session)
+    return PostgresBookRepository(session)
 
 
 def get_knowledge_repository(
-	session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_db_session),
 ) -> KnowledgeRepository:
-	return PostgresKnowledgeRepository(session)
+    return PostgresKnowledgeRepository(session)
 
 
 def get_graph_repository(
-	session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_db_session),
 ) -> GraphRepository:
-	return PostgresGraphRepository(session)
+    return PostgresGraphRepository(session)
 
 
 def get_user_repository(
-	session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_db_session),
 ) -> UserRepository:
-	return PostgresUserRepository(session)
+    return PostgresUserRepository(session)
 
 
 def get_library_repository(
-	session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_db_session),
 ) -> LibraryRepository:
-	return PostgresLibraryRepository(session)
+    return PostgresLibraryRepository(session)
 
 
 def get_library_repository_factory() -> LibraryRepositoryFactory:
-	"""Hand a streaming endpoint a repository it owns for its own lifetime.
+    """Hand a streaming endpoint a repository it owns for its own lifetime.
 
-	The session opened here is not tied to the request scope, so it survives
-	while the response body is produced.
-	"""
+    The session opened here is not tied to the request scope, so it survives
+    while the response body is produced.
+    """
 
-	@asynccontextmanager
-	async def open_library_repository() -> AsyncGenerator[LibraryRepository, None]:
-		async with session_factory() as session:
-			yield PostgresLibraryRepository(session)
+    @asynccontextmanager
+    async def open_library_repository() -> AsyncGenerator[LibraryRepository, None]:
+        async with session_factory() as session:
+            yield PostgresLibraryRepository(session)
 
-	return open_library_repository
+    return open_library_repository
 
 
 def get_list_ebooks_use_case(
-	library: LibraryRepository = Depends(get_library_repository),
+    library: LibraryRepository = Depends(get_library_repository),
 ) -> ListEbooksUseCase:
-	return ListEbooksUseCase(library)
+    return ListEbooksUseCase(library)
 
 
 def get_ebook_status_use_case(
-	library: LibraryRepository = Depends(get_library_repository),
+    library: LibraryRepository = Depends(get_library_repository),
 ) -> GetEbookStatusUseCase:
-	return GetEbookStatusUseCase(library)
+    return GetEbookStatusUseCase(library)
 
 
 def get_book_cover_use_case(
-	library: LibraryRepository = Depends(get_library_repository),
+    library: LibraryRepository = Depends(get_library_repository),
 ) -> GetBookCoverUseCase:
-	return GetBookCoverUseCase(library)
+    return GetBookCoverUseCase(library)
 
 
 def get_position_events() -> PositionEvents:
-	return InMemoryPositionEvents()
+    return InMemoryPositionEvents()
 
 
 def get_stream_position_events_use_case(
-	library: LibraryRepository = Depends(get_library_repository),
-	events: PositionEvents = Depends(get_position_events),
+    library: LibraryRepository = Depends(get_library_repository),
+    events: PositionEvents = Depends(get_position_events),
 ) -> StreamPositionEventsUseCase:
-	return StreamPositionEventsUseCase(library, events)
+    return StreamPositionEventsUseCase(library, events)
 
 
 def get_token_service() -> TokenService:
-	return JwtTokenService(
-		settings.jwt_secret,
-		algorithm=settings.jwt_algorithm,
-		ttl_days=settings.jwt_ttl_days,
-	)
+    return JwtTokenService(
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+        ttl_days=settings.jwt_ttl_days,
+    )
 
 
 @lru_cache
 def get_rate_limiter() -> RateLimiter:
-	return RedisRateLimiter(settings.redis_url)
+    return RedisRateLimiter(settings.redis_url)
 
 
 @lru_cache
 def get_book_status_subscriber() -> BookStatusSubscriber:
-	return RedisBookStatusSubscriber(settings.redis_url)
+    return RedisBookStatusSubscriber(settings.redis_url)
 
 
 def get_stream_book_status_use_case(
-	open_library: LibraryRepositoryFactory = Depends(get_library_repository_factory),
-	statuses: BookStatusSubscriber = Depends(get_book_status_subscriber),
+    open_library: LibraryRepositoryFactory = Depends(get_library_repository_factory),
+    statuses: BookStatusSubscriber = Depends(get_book_status_subscriber),
 ) -> StreamBookStatusUseCase:
-	return StreamBookStatusUseCase(open_library, statuses)
+    return StreamBookStatusUseCase(open_library, statuses)
 
 
 def _caller_ip(request: Request) -> str:
-	if settings.trust_forwarded_for:
-		forwarded = request.headers.get("x-forwarded-for", "")
-		if forwarded:
-			return forwarded.split(",")[0].strip()
-	return request.client.host if request.client else "unknown"
+    if settings.trust_forwarded_for:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 async def enforce_session_rate_limit(
-	request: Request,
-	limiter: RateLimiter = Depends(get_rate_limiter),
+    request: Request,
+    limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> None:
-	decision = await limiter.acquire(
-		f"session:{_caller_ip(request)}",
-		settings.session_rate_limit,
-		settings.session_rate_limit_window_seconds,
-	)
-	if not decision.allowed:
-		raise HTTPException(
-			status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-			detail="Too many sessions created",
-			headers={"Retry-After": str(decision.retry_after)},
-		)
+    decision = await limiter.acquire(
+        f"session:{_caller_ip(request)}",
+        settings.session_rate_limit,
+        settings.session_rate_limit_window_seconds,
+    )
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many sessions created",
+            headers={"Retry-After": str(decision.retry_after)},
+        )
 
 
 def get_current_owner(
-	request: Request,
-	tokens: TokenService = Depends(get_token_service),
+    request: Request,
+    tokens: TokenService = Depends(get_token_service),
 ) -> str:
-	token = request.cookies.get(settings.session_cookie_name)
-	if not token:
-		authorization = request.headers.get("authorization", "")
-		if authorization.lower().startswith("bearer "):
-			token = authorization[7:].strip()
+    token = request.cookies.get(settings.session_cookie_name)
+    if not token:
+        authorization = request.headers.get("authorization", "")
+        if authorization.lower().startswith("bearer "):
+            token = authorization[7:].strip()
 
-	if not token:
-		raise HTTPException(
-			status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing session"
-		)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing session")
 
-	owner_id = tokens.verify(token)
-	if not owner_id:
-		raise HTTPException(
-			status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session"
-		)
-	return owner_id
+    owner_id = tokens.verify(token)
+    if not owner_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+    return owner_id
 
 
 def get_create_session_use_case(
-	users: UserRepository = Depends(get_user_repository),
+    users: UserRepository = Depends(get_user_repository),
 ) -> CreateAnonymousSessionUseCase:
-	return CreateAnonymousSessionUseCase(users)
+    return CreateAnonymousSessionUseCase(users)
 
 
 def get_read_session_use_case(
-	users: UserRepository = Depends(get_user_repository),
+    users: UserRepository = Depends(get_user_repository),
 ) -> ReadSessionUseCase:
-	return ReadSessionUseCase(users)
+    return ReadSessionUseCase(users)
 
 
 def get_delete_ebook_use_case(
-	library: LibraryRepository = Depends(get_library_repository),
+    library: LibraryRepository = Depends(get_library_repository),
 ) -> DeleteEbookUseCase:
-	return DeleteEbookUseCase(library)
+    return DeleteEbookUseCase(library)
 
 
 def get_graph_assembly_service(
-	graph_repository: GraphRepository = Depends(get_graph_repository),
+    graph_repository: GraphRepository = Depends(get_graph_repository),
 ) -> GraphAssemblyService:
-	return GraphAssemblyService(graph_repository)
+    return GraphAssemblyService(graph_repository)
 
 
 def get_koreader_progress_adapter(
-	book_repository: BookRepository = Depends(get_book_repository),
+    book_repository: BookRepository = Depends(get_book_repository),
 ) -> ReadingProgressProvider:
-	return KoreaderProgressAdapter(book_repository)
+    return KoreaderProgressAdapter(book_repository)
 
 
 def get_sync_progress_use_case(
-	adapter: ReadingProgressProvider = Depends(get_koreader_progress_adapter),
-	library: LibraryRepository = Depends(get_library_repository),
-	graph_queue: GraphGenerationQueue = Depends(get_graph_generation_queue),
+    adapter: ReadingProgressProvider = Depends(get_koreader_progress_adapter),
+    library: LibraryRepository = Depends(get_library_repository),
+    graph_queue: GraphGenerationQueue = Depends(get_graph_generation_queue),
 ) -> SyncProgressUseCase:
-	return SyncProgressUseCase(adapter, library, graph_queue)
+    return SyncProgressUseCase(adapter, library, graph_queue)
 
 
 def get_book_graph_use_case(
-	library: LibraryRepository = Depends(get_library_repository),
-	assembly: GraphAssemblyService = Depends(get_graph_assembly_service),
+    library: LibraryRepository = Depends(get_library_repository),
+    assembly: GraphAssemblyService = Depends(get_graph_assembly_service),
 ) -> GetBookGraphUseCase:
-	return GetBookGraphUseCase(library, assembly)
+    return GetBookGraphUseCase(library, assembly)
 
 
 def get_upload_ebook_use_case(
-	book_repository: BookRepository = Depends(get_book_repository),
-	storage: EbookStorage = Depends(get_ebook_storage),
-	queue: EbookProcessingQueue = Depends(get_ebook_processing_queue),
-	library: LibraryRepository = Depends(get_library_repository),
-	metadata_reader: EbookMetadataReader = Depends(get_ebook_metadata_reader),
+    book_repository: BookRepository = Depends(get_book_repository),
+    storage: EbookStorage = Depends(get_ebook_storage),
+    queue: EbookProcessingQueue = Depends(get_ebook_processing_queue),
+    library: LibraryRepository = Depends(get_library_repository),
+    metadata_reader: EbookMetadataReader = Depends(get_ebook_metadata_reader),
 ) -> UploadEbookUseCase:
-	return UploadEbookUseCase(
-		book_repository,
-		storage,
-		queue,
-		library,
-		metadata_reader,
-		max_size_bytes=settings.max_ebook_size_bytes,
-	)
+    return UploadEbookUseCase(
+        book_repository,
+        storage,
+        queue,
+        library,
+        metadata_reader,
+        max_size_bytes=settings.max_ebook_size_bytes,
+    )
 
 
 def get_retry_ebook_use_case(
-	book_repository: BookRepository = Depends(get_book_repository),
-	queue: EbookProcessingQueue = Depends(get_ebook_processing_queue),
-	library: LibraryRepository = Depends(get_library_repository),
+    book_repository: BookRepository = Depends(get_book_repository),
+    queue: EbookProcessingQueue = Depends(get_ebook_processing_queue),
+    library: LibraryRepository = Depends(get_library_repository),
 ) -> RetryEbookUseCase:
-	return RetryEbookUseCase(book_repository, queue, library)
+    return RetryEbookUseCase(book_repository, queue, library)
 
 
 def get_rag_index_reader(
-	session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_db_session),
 ) -> RagIndexReader:
-	return PostgresRagRepository(session)
+    return PostgresRagRepository(session)
 
 
 def get_retrieval_repository(
-	session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_db_session),
 ) -> RetrievalRepository:
-	return PostgresRetrievalRepository(session)
+    return PostgresRetrievalRepository(session)
 
 
 @lru_cache
 def get_embedding_provider() -> EmbeddingProvider:
-	return build_embedding_provider()
+    return build_embedding_provider()
 
 
 @lru_cache
 def get_answer_provider() -> AnswerProvider:
-	return build_llm_provider()
+    return build_llm_provider()
 
 
 def get_retrieve_context_use_case(
-	repository: RetrievalRepository = Depends(get_retrieval_repository),
-	embeddings: EmbeddingProvider = Depends(get_embedding_provider),
+    repository: RetrievalRepository = Depends(get_retrieval_repository),
+    embeddings: EmbeddingProvider = Depends(get_embedding_provider),
 ) -> RetrieveContextUseCase:
-	return RetrieveContextUseCase(
-		repository,
-		embeddings,
-		top_k=settings.retrieval_top_k,
-	)
+    return RetrieveContextUseCase(
+        repository,
+        embeddings,
+        top_k=settings.retrieval_top_k,
+    )
 
 
 def get_answer_question_use_case(
-	library: LibraryRepository = Depends(get_library_repository),
-	index: RagIndexReader = Depends(get_rag_index_reader),
-	retrieval: RetrieveContextUseCase = Depends(get_retrieve_context_use_case),
-	answers: AnswerProvider = Depends(get_answer_provider),
-	embeddings: EmbeddingProvider = Depends(get_embedding_provider),
+    library: LibraryRepository = Depends(get_library_repository),
+    index: RagIndexReader = Depends(get_rag_index_reader),
+    retrieval: RetrieveContextUseCase = Depends(get_retrieve_context_use_case),
+    answers: AnswerProvider = Depends(get_answer_provider),
+    embeddings: EmbeddingProvider = Depends(get_embedding_provider),
 ) -> AnswerQuestionUseCase:
-	return AnswerQuestionUseCase(
-		library,
-		index,
-		retrieval,
-		answers,
-		embedding_model=embeddings.model,
-	)
+    return AnswerQuestionUseCase(
+        library,
+        index,
+        retrieval,
+        answers,
+        embedding_model=embeddings.model,
+    )

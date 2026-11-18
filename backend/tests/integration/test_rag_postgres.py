@@ -179,17 +179,17 @@ def test_embedding_sources_keep_each_source_position() -> None:
         assert len(by_type[EmbeddingSourceType.FACT]) == 2
         assert len(by_type[EmbeddingSourceType.EVENT]) == 1
         assert len(by_type[EmbeddingSourceType.LOCATION]) == 1
-        assert {
-            source.reading_position
-            for source in by_type[EmbeddingSourceType.ENTITY]
-        } == {0.1, 0.4}
+        assert {source.reading_position for source in by_type[EmbeddingSourceType.ENTITY]} == {
+            0.1,
+            0.4,
+        }
         assert all(source.chunk_id for source in sources)
-        assert {
-            source.source_id for source in by_type[EmbeddingSourceType.CHUNK]
-        } == {"rag-chunk-1", "rag-chunk-2"}
+        assert {source.source_id for source in by_type[EmbeddingSourceType.CHUNK]} == {
+            "rag-chunk-1",
+            "rag-chunk-2",
+        }
         entity_texts = {
-            source.source_id: source.text
-            for source in by_type[EmbeddingSourceType.ENTITY]
+            source.source_id: source.text for source in by_type[EmbeddingSourceType.ENTITY]
         }
         assert entity_texts["rag-e1"] == "Alice (character)\nThe protagonist\nAl"
 
@@ -201,9 +201,7 @@ def test_embedding_upsert_is_idempotent() -> None:
         repository = PostgresRagRepository(session)
         sources = await repository.get_embedding_sources(BOOK_ID)
         chunk = next(
-            source
-            for source in sources
-            if source.source_type == EmbeddingSourceType.CHUNK
+            source for source in sources if source.source_type == EmbeddingSourceType.CHUNK
         )
 
         await repository.upsert_embeddings(
@@ -217,12 +215,8 @@ def test_embedding_upsert_is_idempotent() -> None:
             [(chunk, "second-hash", vector(0.5))],
         )
 
-        hashes = await repository.get_existing_hashes(
-            BOOK_ID, "gemini-embedding-001"
-        )
-        count = await session.scalar(
-            select(func.count()).select_from(RagEmbeddingRecord)
-        )
+        hashes = await repository.get_existing_hashes(BOOK_ID, "gemini-embedding-001")
+        count = await session.scalar(select(func.count()).select_from(RagEmbeddingRecord))
         assert hashes[(chunk.source_type.value, chunk.source_id)] == "second-hash"
         assert count == 1
 
@@ -247,9 +241,7 @@ def test_community_run_is_stored_and_swapped_atomically() -> None:
             tree=tree,
             status=RagIndexStatus.READY,
         )
-        assert await repository.needs_build(
-            BOOK_ID, 0, "gemini-embedding-001", 3600
-        ) is False
+        assert await repository.needs_build(BOOK_ID, 0, "gemini-embedding-001", 3600) is False
 
         second_run = await repository.save_community_run(
             BOOK_ID,
@@ -261,15 +253,9 @@ def test_community_run_is_stored_and_swapped_atomically() -> None:
         )
         state = await session.get(RagIndexStateRecord, BOOK_ID)
         run = await session.get(RagCommunityRunRecord, second_run)
-        runs = await session.scalar(
-            select(func.count()).select_from(RagCommunityRunRecord)
-        )
-        communities = await session.scalar(
-            select(func.count()).select_from(RagCommunityRecord)
-        )
-        members = await session.scalar(
-            select(func.count()).select_from(RagCommunityMemberRecord)
-        )
+        runs = await session.scalar(select(func.count()).select_from(RagCommunityRunRecord))
+        communities = await session.scalar(select(func.count()).select_from(RagCommunityRecord))
+        members = await session.scalar(select(func.count()).select_from(RagCommunityMemberRecord))
         assert first_run != second_run
         assert state is not None
         assert state.current_run_id == second_run
@@ -282,15 +268,10 @@ def test_community_run_is_stored_and_swapped_atomically() -> None:
         assert run.node_count == len(graph.nodes)
         assert run.edge_count == len(graph.edges)
         assert run.algorithm == "leiden"
-        assert (
-            run.parameters["unclustered_nodes"]
-            == tree.parameters["unclustered_nodes"]
-        )
+        assert run.parameters["unclustered_nodes"] == tree.parameters["unclustered_nodes"]
         assert runs == 1
         assert communities == len(tree.communities)
-        assert members == sum(
-            len(community.member_ids) for community in tree.communities
-        )
+        assert members == sum(len(community.member_ids) for community in tree.communities)
 
     run_against_postgres(work)
 
@@ -326,9 +307,7 @@ def test_delete_by_book_clears_the_index() -> None:
             RagIndexStateRecord,
         ):
             assert await session.scalar(select(func.count()).select_from(model)) == 0
-        assert await repository.needs_build(
-            BOOK_ID, 1, "gemini-embedding-001", 3600
-        ) is True
+        assert await repository.needs_build(BOOK_ID, 1, "gemini-embedding-001", 3600) is True
 
     run_against_postgres(work)
 
@@ -401,11 +380,7 @@ def test_community_members_store_their_first_seen_position() -> None:
 
         positions = {node.node_id: node.reading_position for node in graph.nodes}
         mention_counts = {node.node_id: node.mention_count for node in graph.nodes}
-        covered = {
-            node_id
-            for community in tree.communities
-            for node_id in community.member_ids
-        }
+        covered = {node_id for community in tree.communities for node_id in community.member_ids}
         rows = (await session.execute(select(RagCommunityMemberRecord))).scalars().all()
 
         assert rows
@@ -452,12 +427,12 @@ def test_embedding_uniqueness_is_scoped_to_a_book() -> None:
         )
         assert count == 2
         key = (shared.source_type.value, shared.source_id)
-        assert await repository.get_existing_hashes(
-            BOOK_ID, "gemini-embedding-001"
-        ) == {key: "hash-1"}
-        assert await repository.get_existing_hashes(
-            "rag-book-2", "gemini-embedding-001"
-        ) == {key: "hash-2"}
+        assert await repository.get_existing_hashes(BOOK_ID, "gemini-embedding-001") == {
+            key: "hash-1"
+        }
+        assert await repository.get_existing_hashes("rag-book-2", "gemini-embedding-001") == {
+            key: "hash-2"
+        }
 
     run_against_postgres(work)
 

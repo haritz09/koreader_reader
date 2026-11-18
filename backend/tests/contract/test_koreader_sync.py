@@ -2,10 +2,10 @@ from fastapi.testclient import TestClient
 
 from adapters.koreader.progress_provider import KoreaderProgressAdapter
 from api.dependencies import (
-	get_book_repository,
-	get_graph_generation_queue,
-	get_koreader_progress_adapter,
-	get_library_repository,
+    get_book_repository,
+    get_graph_generation_queue,
+    get_koreader_progress_adapter,
+    get_library_repository,
 )
 from main import app
 from tests.fixtures.repositories import FakeLibraryRepository, reading_state
@@ -30,8 +30,8 @@ class InMemoryBookRepository:
 def client_for_books(books: dict[str, str], **kwargs) -> TestClient:
     repository = InMemoryBookRepository(books)
     app.dependency_overrides[get_book_repository] = lambda: repository
-    app.dependency_overrides[get_koreader_progress_adapter] = lambda: (
-        KoreaderProgressAdapter(repository)
+    app.dependency_overrides[get_koreader_progress_adapter] = lambda: KoreaderProgressAdapter(
+        repository
     )
     app.dependency_overrides[get_library_repository] = lambda: FakeLibraryRepository(
         reading_state(

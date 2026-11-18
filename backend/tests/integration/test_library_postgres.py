@@ -150,9 +150,7 @@ def test_a_shared_book_keeps_one_content_row_for_two_owners(
         app.dependency_overrides.clear()
 
     assert first.json()["book_id"] == second.json()["book_id"]
-    assert [book["book_id"] for book in second_list.json()["books"]] == [
-        second.json()["book_id"]
-    ]
+    assert [book["book_id"] for book in second_list.json()["books"]] == [second.json()["book_id"]]
 
     content_rows = postgres_connection.execute(
         "SELECT COUNT(*) FROM books WHERE document_hash = %s",
@@ -286,9 +284,7 @@ def test_reading_progress_is_stored_per_owner(
         library = PostgresLibraryRepository(session)
         synced_at = datetime.now(UTC)
 
-        stored = await library.update_progress(
-            TEST_OWNER_ID, "book-1", 0.7, synced_at
-        )
+        stored = await library.update_progress(TEST_OWNER_ID, "book-1", 0.7, synced_at)
         first = await library.get_reading_state(TEST_OWNER_ID, "book-1")
         second = await library.get_reading_state("owner-2", "book-1")
 

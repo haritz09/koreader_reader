@@ -121,8 +121,7 @@ def _log_progress(
     total: int,
 ) -> None:
     logger.info(
-        "Knowledge extraction progress: book=%s batches=%d/%d chunks=%d/%d "
-        "succeeded=%d failed=%d",
+        "Knowledge extraction progress: book=%s batches=%d/%d chunks=%d/%d succeeded=%d failed=%d",
         book_id,
         completed_batches,
         total_batches,
@@ -229,9 +228,7 @@ class KnowledgeExtractionService:
         )
 
         semaphore = asyncio.Semaphore(self._concurrency)
-        tasks = [
-            asyncio.create_task(self._extract_batch(batch, semaphore)) for batch in batches
-        ]
+        tasks = [asyncio.create_task(self._extract_batch(batch, semaphore)) for batch in batches]
         progress = _Progress()
         completed_batches = 0
 
@@ -422,8 +419,7 @@ def _log_abort(
 def _log_finished(book_id: str, summary: ExtractionSummary) -> None:
     if summary.failed:
         logger.warning(
-            "Knowledge extraction finished with failures: book=%s total=%d "
-            "succeeded=%d failed=%d",
+            "Knowledge extraction finished with failures: book=%s total=%d succeeded=%d failed=%d",
             book_id,
             summary.total,
             summary.succeeded,

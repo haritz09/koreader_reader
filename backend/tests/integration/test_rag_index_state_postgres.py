@@ -89,9 +89,7 @@ def test_missing_index_state_is_none(clean_postgres_database) -> None:
     asyncio.run(seed())
 
     async def work(session: AsyncSession) -> None:
-        state = await PostgresRagRepository(session).get_index_state(
-            "unindexed-book"
-        )
+        state = await PostgresRagRepository(session).get_index_state("unindexed-book")
 
         assert state is None
 

@@ -28,10 +28,7 @@ class _ChunkTaggingLLMProvider:
         self,
         chunks: list[tuple[str, str]],
     ) -> dict[str, KnowledgeExtractionResult]:
-        return {
-            chunk_id: await self.extract_knowledge(text)
-            for chunk_id, text in chunks
-        }
+        return {chunk_id: await self.extract_knowledge(text) for chunk_id, text in chunks}
 
     async def extract_knowledge(self, chunk_text: str) -> KnowledgeExtractionResult:
         return KnowledgeExtractionResult(
@@ -301,9 +298,7 @@ class _EmptyLLMProvider:
         chunks: list[tuple[str, str]],
     ) -> dict[str, KnowledgeExtractionResult]:
         return {
-            chunk_id: KnowledgeExtractionResult(
-                entities=[], facts=[], events=[], locations=[]
-            )
+            chunk_id: KnowledgeExtractionResult(entities=[], facts=[], events=[], locations=[])
             for chunk_id, _ in chunks
         }
 
@@ -316,10 +311,11 @@ def test_extraction_marks_every_attempted_chunk_as_pending_done(
         book_repository = PostgresBookRepository(session)
 
         assert await book_repository.count_chunks("book-a") == 3
-        assert [
-            chunk_id
-            for chunk_id, _ in await book_repository.get_pending_chunks("book-a")
-        ] == ["book-a-chunk-0", "book-a-chunk-1", "book-a-chunk-2"]
+        assert [chunk_id for chunk_id, _ in await book_repository.get_pending_chunks("book-a")] == [
+            "book-a-chunk-0",
+            "book-a-chunk-1",
+            "book-a-chunk-2",
+        ]
 
         await _extract_knowledge(session, "book-a", chunks[:1])
         await KnowledgeExtractionService(

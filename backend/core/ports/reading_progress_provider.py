@@ -10,5 +10,4 @@ class ReadingProgressProvider(Protocol):
         self,
         document_hash: str,
         position: float,
-    ) -> ReadingProgress | None:
-        ...
+    ) -> ReadingProgress | None: ...

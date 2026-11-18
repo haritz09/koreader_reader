@@ -10,33 +10,33 @@ from core.ports.position_events import PositionEvents
 
 
 class StreamPositionEventsUseCase:
-	def __init__(
-		self,
-		library: LibraryRepository,
-		events: PositionEvents,
-	) -> None:
-		self._library = library
-		self._events = events
+    def __init__(
+        self,
+        library: LibraryRepository,
+        events: PositionEvents,
+    ) -> None:
+        self._library = library
+        self._events = events
 
-	async def execute(
-		self,
-		owner_id: str,
-		book_id: str,
-	) -> AsyncGenerator[dict[str, Any], None]:
-		if await self._library.get_book(owner_id, book_id) is None:
-			raise BookNotFoundError(book_id)
-		return self._events_for(owner_id, book_id)
+    async def execute(
+        self,
+        owner_id: str,
+        book_id: str,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        if await self._library.get_book(owner_id, book_id) is None:
+            raise BookNotFoundError(book_id)
+        return self._events_for(owner_id, book_id)
 
-	async def _events_for(
-		self,
-		owner_id: str,
-		book_id: str,
-	) -> AsyncGenerator[dict[str, Any], None]:
-		subscription = await self._events.subscribe(owner_id, book_id)
-		try:
-			while True:
-				yield await subscription.get()
-		except asyncio.CancelledError:
-			pass
-		finally:
-			subscription.close()
+    async def _events_for(
+        self,
+        owner_id: str,
+        book_id: str,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        subscription = await self._events.subscribe(owner_id, book_id)
+        try:
+            while True:
+                yield await subscription.get()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            subscription.close()

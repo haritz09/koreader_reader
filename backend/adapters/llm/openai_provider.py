@@ -158,9 +158,7 @@ class OpenAIProvider:
         )
         return self._parse_batch_response(content, {chunk_id for chunk_id, _ in chunks})
 
-    async def resolve_group(
-        self, candidates: Sequence[EntityCandidate]
-    ) -> list[list[str]]:
+    async def resolve_group(self, candidates: Sequence[EntityCandidate]) -> list[list[str]]:
         if len(candidates) < 2:
             return []
 
@@ -181,9 +179,7 @@ class OpenAIProvider:
         question: str,
         chunks: Sequence[RetrievedChunk],
     ) -> AnswerDraft:
-        listing = "\n\n".join(
-            f"[chunk_id={chunk.chunk_id}]\n{chunk.text}" for chunk in chunks
-        )
+        listing = "\n\n".join(f"[chunk_id={chunk.chunk_id}]\n{chunk.text}" for chunk in chunks)
         content = await self._post_chat(
             [
                 {"role": "system", "content": _ANSWER_PROMPT},
@@ -296,9 +292,7 @@ class OpenAIProvider:
 
         return AnswerDraft(
             text=answer,
-            cited_chunk_ids=tuple(
-                citation for citation in citations if isinstance(citation, str)
-            ),
+            cited_chunk_ids=tuple(citation for citation in citations if isinstance(citation, str)),
         )
 
     @staticmethod
@@ -334,11 +328,7 @@ class OpenAIProvider:
             if not isinstance(raw, dict):
                 raise LLMTransientError("LLM returned an invalid batch response")
             chunk_id = raw.get("chunk_id")
-            if (
-                not isinstance(chunk_id, str)
-                or chunk_id not in expected_ids
-                or chunk_id in results
-            ):
+            if not isinstance(chunk_id, str) or chunk_id not in expected_ids or chunk_id in results:
                 raise LLMTransientError("LLM returned an invalid batch response")
             results[chunk_id] = _parse_payload(raw)
 
@@ -449,7 +439,9 @@ def _entity_type(value: object) -> EntityType:
         candidate = value.strip().casefold()
         if candidate in ENTITY_TYPES:
             return cast(EntityType, candidate)
-    logger.warning("LLM returned an unknown entity_type %r, storing %r", value, FALLBACK_ENTITY_TYPE)
+    logger.warning(
+        "LLM returned an unknown entity_type %r, storing %r", value, FALLBACK_ENTITY_TYPE
+    )
     return FALLBACK_ENTITY_TYPE
 
 

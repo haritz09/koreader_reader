@@ -25,8 +25,7 @@ def test_retry_resumes_only_the_chunks_left_unprocessed(
         (book_id,),
     )
     postgres_connection.execute(
-        "UPDATE chunks SET extracted_at = NULL "
-        "WHERE book_id = %s AND chunk_index = 1",
+        "UPDATE chunks SET extracted_at = NULL WHERE book_id = %s AND chunk_index = 1",
         (book_id,),
     )
     postgres_connection.execute(
@@ -42,8 +41,7 @@ def test_retry_resumes_only_the_chunks_left_unprocessed(
     assert final["chunks_total"] == final["chunks_extracted"]
 
     rows = postgres_connection.execute(
-        "SELECT chunk_index, extracted_at FROM chunks "
-        "WHERE book_id = %s ORDER BY chunk_index",
+        "SELECT chunk_index, extracted_at FROM chunks WHERE book_id = %s ORDER BY chunk_index",
         (book_id,),
     ).fetchall()
     assert [row[1] is not None for row in rows] == [True, True]

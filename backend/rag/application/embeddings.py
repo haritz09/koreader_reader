@@ -64,9 +64,7 @@ class EmbedKnowledgeService:
 
     async def embed_book(self, book_id: str) -> EmbeddingSummary:
         sources = await self._repository.get_embedding_sources(book_id)
-        existing = await self._repository.get_existing_hashes(
-            book_id, self._provider.model
-        )
+        existing = await self._repository.get_existing_hashes(book_id, self._provider.model)
 
         pending, reused, skipped = _select_pending(sources, existing)
         vectors = await self._embed_unique(pending)
@@ -126,10 +124,6 @@ class EmbedKnowledgeService:
             )
         for vector in vectors:
             if len(vector) != self._dimensions:
-                raise EmbeddingTransientError(
-                    "embedding provider returned an invalid vector"
-                )
+                raise EmbeddingTransientError("embedding provider returned an invalid vector")
             if not all(math.isfinite(value) for value in vector):
-                raise EmbeddingTransientError(
-                    "embedding provider returned a non-finite vector"
-                )
+                raise EmbeddingTransientError("embedding provider returned a non-finite vector")

@@ -38,9 +38,7 @@ class PostgresRagRepository:
         self._session = session
 
     async def get_graph_revision(self, book_id: str) -> int:
-        result = await self._session.execute(
-            select(Book.graph_revision).where(Book.id == book_id)
-        )
+        result = await self._session.execute(select(Book.graph_revision).where(Book.id == book_id))
         return int(result.scalar_one_or_none() or 0)
 
     async def get_index_state(self, book_id: str) -> RagIndexState | None:
@@ -346,9 +344,7 @@ class PostgresRagRepository:
                 )
             )
 
-        named_mentions.sort(
-            key=lambda mention: (mention.reading_position, mention.mention_id)
-        )
+        named_mentions.sort(key=lambda mention: (mention.reading_position, mention.mention_id))
         return ClusterSources(
             entity_mentions=tuple(entity_mentions),
             named_mentions=tuple(named_mentions),
@@ -536,19 +532,12 @@ class PostgresRagRepository:
         state = await self._session.get(RagIndexStateRecord, book_id)
         if state is None:
             return True
-        if (
-            state.graph_revision != graph_revision
-            or state.embedding_model != embedding_model
-        ):
+        if state.graph_revision != graph_revision or state.embedding_model != embedding_model:
             return True
         if state.status == RagIndexStatus.BUILDING.value:
-            stale_before = datetime.now(UTC) - timedelta(
-                seconds=max(0, stale_after_seconds)
-            )
+            stale_before = datetime.now(UTC) - timedelta(seconds=max(0, stale_after_seconds))
             return state.updated_at < stale_before
-        return state.status not in {
-            status.value for status in RAG_INDEX_CURRENT_STATUSES
-        }
+        return state.status not in {status.value for status in RAG_INDEX_CURRENT_STATUSES}
 
     async def delete_by_book(self, book_id: str) -> None:
         await self._session.execute(

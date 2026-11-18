@@ -17,9 +17,7 @@ class BookProcessingError(Exception):
     """Raised when a book cannot be removed because processing is in flight."""
 
     def __init__(self, book_id: str) -> None:
-        super().__init__(
-            f"Book {book_id} is processing and cannot be deleted"
-        )
+        super().__init__(f"Book {book_id} is processing and cannot be deleted")
 
 
 class SessionNotFoundError(Exception):

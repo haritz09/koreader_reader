@@ -12,23 +12,21 @@ router = APIRouter(prefix="/ebooks", tags=["graph"])
 
 
 @router.get(
-	"/{book_id}/graph",
-	response_model=GraphResponse,
+    "/{book_id}/graph",
+    response_model=GraphResponse,
 )
 async def get_book_graph(
-	book_id: str,
-	owner_id: str = Depends(get_current_owner),
-	use_case: GetBookGraphUseCase = Depends(get_book_graph_use_case),
+    book_id: str,
+    owner_id: str = Depends(get_current_owner),
+    use_case: GetBookGraphUseCase = Depends(get_book_graph_use_case),
 ) -> GraphResponse:
-	try:
-		graph = await use_case.execute(owner_id, book_id)
-	except BookNotFoundError as error:
-		raise HTTPException(
-			status_code=status.HTTP_404_NOT_FOUND, detail="Book not found"
-		) from error
-	except BookNotReadyError as error:
-		raise HTTPException(
-			status_code=status.HTTP_409_CONFLICT, detail=str(error)
-		) from error
+    try:
+        graph = await use_case.execute(owner_id, book_id)
+    except BookNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Book not found"
+        ) from error
+    except BookNotReadyError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
-	return graph_response(graph)
+    return graph_response(graph)

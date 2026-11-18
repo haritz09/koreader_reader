@@ -33,8 +33,7 @@ class MockEmbeddingProvider:
     def _vector(self, text: str) -> list[float]:
         digest = hashlib.sha256(text.encode("utf-8")).digest()
         raw = [
-            (digest[index % len(digest)] / 255.0) * 2.0 - 1.0
-            for index in range(self._dimensions)
+            (digest[index % len(digest)] / 255.0) * 2.0 - 1.0 for index in range(self._dimensions)
         ]
         norm = math.sqrt(sum(value * value for value in raw)) or 1.0
         return [value / norm for value in raw]

@@ -30,16 +30,16 @@ class RagEmbeddingRecord(Base):
     __tablename__ = "rag_embeddings"
     __table_args__ = (
         UniqueConstraint("book_id", "source_type", "source_id", "model"),
-        Index("ix_rag_embeddings_book_source_position", "book_id", "source_type", "reading_position"),
+        Index(
+            "ix_rag_embeddings_book_source_position", "book_id", "source_type", "reading_position"
+        ),
         Index("ix_rag_embeddings_book_model", "book_id", "model"),
         CheckConstraint(READING_POSITION_CHECK, name="ck_rag_embeddings_reading_position"),
         CheckConstraint(EMBEDDING_SOURCE_TYPE_CHECK, name="ck_rag_embeddings_source_type"),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
-    book_id: Mapped[str] = mapped_column(
-        ForeignKey("books.id", ondelete="CASCADE"), nullable=False
-    )
+    book_id: Mapped[str] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     source_id: Mapped[str] = mapped_column(String(255), nullable=False)
     chunk_id: Mapped[str | None] = mapped_column(
@@ -48,9 +48,7 @@ class RagEmbeddingRecord(Base):
     reading_position: Mapped[float] = mapped_column(Float, nullable=False)
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(
-        Vector(EMBEDDING_DIMENSIONS), nullable=False
-    )
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIMENSIONS), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -89,9 +87,7 @@ class RagCommunityRecord(Base):
     run_id: Mapped[str] = mapped_column(
         ForeignKey("rag_community_runs.id", ondelete="CASCADE"), nullable=False
     )
-    book_id: Mapped[str] = mapped_column(
-        ForeignKey("books.id", ondelete="CASCADE"), nullable=False
-    )
+    book_id: Mapped[str] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
     parent_id: Mapped[str | None] = mapped_column(
         ForeignKey("rag_communities.id", ondelete="CASCADE"), nullable=True
     )
@@ -125,9 +121,7 @@ class RagCommunityMemberRecord(Base):
 
 class RagIndexStateRecord(Base):
     __tablename__ = "rag_index_states"
-    __table_args__ = (
-        CheckConstraint(RAG_INDEX_STATUS_CHECK, name="ck_rag_index_states_status"),
-    )
+    __table_args__ = (CheckConstraint(RAG_INDEX_STATUS_CHECK, name="ck_rag_index_states_status"),)
 
     book_id: Mapped[str] = mapped_column(
         ForeignKey("books.id", ondelete="CASCADE"), primary_key=True

@@ -30,9 +30,9 @@ class PostgresRetrievalRepository:
         if limit <= 0:
             return []
 
-        distance = RagEmbeddingRecord.embedding.cosine_distance(
-            list(query_embedding)
-        ).label("distance")
+        distance = RagEmbeddingRecord.embedding.cosine_distance(list(query_embedding)).label(
+            "distance"
+        )
         result = await self._session.execute(
             select(
                 RagEmbeddingRecord.chunk_id,

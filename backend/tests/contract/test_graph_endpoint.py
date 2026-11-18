@@ -82,9 +82,7 @@ class FilteringGraphRepository:
     ) -> list[EntityMention]:
         return [m for m in self.mentions if m.reading_position <= reading_position]
 
-    async def get_visible_facts(
-        self, book_id: str, reading_position: float
-    ) -> list[FactLink]:
+    async def get_visible_facts(self, book_id: str, reading_position: float) -> list[FactLink]:
         return [f for f in self.facts if f.reading_position <= reading_position]
 
     async def get_revision(self, book_id: str) -> int:
@@ -154,7 +152,9 @@ def test_graph_endpoint_exposes_only_position_visible_data_for_partial_extractio
 
 
 def test_graph_endpoint_ignores_a_client_supplied_position() -> None:
-    response = fetch(known_library(progress_position=0.5), "/api/v1/ebooks/book-123/graph?position=1.0")
+    response = fetch(
+        known_library(progress_position=0.5), "/api/v1/ebooks/book-123/graph?position=1.0"
+    )
 
     assert response.status_code == 200
     assert [node["label"] for node in response.json()["nodes"]] == ["Alice", "Bob"]

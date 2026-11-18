@@ -13,10 +13,10 @@ from db.base import Base
 
 
 class UserRecord(Base):
-	__tablename__ = "users"
+    __tablename__ = "users"
 
-	id: Mapped[str] = mapped_column(String(255), primary_key=True)
-	is_anonymous: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-	created_at: Mapped[datetime] = mapped_column(
-		DateTime(timezone=True), nullable=False, server_default=func.now()
-	)
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    is_anonymous: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

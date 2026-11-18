@@ -115,13 +115,9 @@ def seed_index() -> None:
                 [
                     embedding("early-chunk", "chunk", "chunk-early", 0.1, MODEL, axis(1)),
                     embedding("early-entity", "entity", "chunk-early", 0.1, MODEL, axis(0)),
-                    embedding(
-                        "boundary-chunk", "chunk", "chunk-boundary", 0.5, MODEL, axis(2)
-                    ),
+                    embedding("boundary-chunk", "chunk", "chunk-boundary", 0.5, MODEL, axis(2)),
                     embedding("late-chunk", "chunk", "chunk-late", 0.9, MODEL, axis(0)),
-                    embedding(
-                        "orphan-entity", "entity", None, 0.2, MODEL, axis(0)
-                    ),
+                    embedding("orphan-entity", "entity", None, 0.2, MODEL, axis(0)),
                     embedding(
                         "other-model", "chunk", "chunk-other-model", 0.2, "old-model", axis(0)
                     ),
@@ -216,8 +212,6 @@ def test_unknown_book_returns_no_chunks() -> None:
 def test_repository_rejects_an_invalid_position() -> None:
     async def work(session: AsyncSession) -> None:
         with pytest.raises(InvalidReadingPositionError):
-            await PostgresRetrievalRepository(session).search_chunks(
-                BOOK_ID, 1.5, MODEL, QUERY, 10
-            )
+            await PostgresRetrievalRepository(session).search_chunks(BOOK_ID, 1.5, MODEL, QUERY, 10)
 
     run_against_postgres(work)

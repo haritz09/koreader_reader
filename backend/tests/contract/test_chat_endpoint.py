@@ -132,17 +132,13 @@ def test_chat_returns_not_found_for_an_unknown_book() -> None:
 
 
 def test_chat_conflicts_while_the_book_is_processing() -> None:
-    response, _ = post_chat(
-        library=known_library(processing_status="processing")
-    )
+    response, _ = post_chat(library=known_library(processing_status="processing"))
 
     assert response.status_code == 409
 
 
 def test_chat_conflicts_when_the_index_is_not_ready() -> None:
-    response, _ = post_chat(
-        index=StubIndexReader(RagIndexState(RagIndexStatus.FAILED, MODEL))
-    )
+    response, _ = post_chat(index=StubIndexReader(RagIndexState(RagIndexStatus.FAILED, MODEL)))
 
     assert response.status_code == 409
     assert "index" in response.json()["detail"].lower()

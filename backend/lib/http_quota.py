@@ -66,11 +66,7 @@ def classify_quota(response: httpx.Response) -> tuple[bool, float | None]:
             quota_text = " ".join(
                 str(violation.get(key, "")) for key in ("quotaId", "quotaMetric")
             ).lower()
-            if (
-                "perday" in quota_text
-                or "per day" in quota_text
-                or "daily" in quota_text
-            ):
+            if "perday" in quota_text or "per day" in quota_text or "daily" in quota_text:
                 daily = True
 
     if retry_after is not None and retry_after > 300:

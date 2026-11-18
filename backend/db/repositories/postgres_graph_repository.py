@@ -36,9 +36,7 @@ class PostgresGraphRepository:
         mentions.sort(key=lambda mention: (mention.reading_position, mention.entity_id))
         return mentions
 
-    async def _entity_mentions(
-        self, book_id: str, position: float
-    ) -> list[EntityMention]:
+    async def _entity_mentions(self, book_id: str, position: float) -> list[EntityMention]:
         result = await self._session.execute(
             select(
                 EntityRecord.id,
@@ -145,7 +143,5 @@ class PostgresGraphRepository:
 
     async def delete_by_book(self, book_id: str) -> None:
         for table in (EntityRecord, FactRecord, EventRecord, LocationRecord):
-            await self._session.execute(
-                table.__table__.delete().where(table.book_id == book_id)
-            )
+            await self._session.execute(table.__table__.delete().where(table.book_id == book_id))
         await self._session.commit()

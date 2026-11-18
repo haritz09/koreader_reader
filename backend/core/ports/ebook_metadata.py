@@ -9,5 +9,4 @@ class EbookMetadata:
 
 
 class EbookMetadataReader(Protocol):
-    async def read_metadata(self, storage_path: str) -> EbookMetadata:
-        ...
+    async def read_metadata(self, storage_path: str) -> EbookMetadata: ...

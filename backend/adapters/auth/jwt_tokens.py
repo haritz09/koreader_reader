@@ -6,9 +6,7 @@ import jwt
 
 
 class JwtTokenService:
-    def __init__(
-        self, secret: str, algorithm: str = "HS256", ttl_days: int = 365
-    ) -> None:
+    def __init__(self, secret: str, algorithm: str = "HS256", ttl_days: int = 365) -> None:
         self._secret = secret
         self._algorithm = algorithm
         self._ttl = timedelta(days=ttl_days)
@@ -20,9 +18,7 @@ class JwtTokenService:
 
     def verify(self, token: str) -> str | None:
         try:
-            payload = jwt.decode(
-                token, self._secret, algorithms=[self._algorithm]
-            )
+            payload = jwt.decode(token, self._secret, algorithms=[self._algorithm])
         except jwt.PyJWTError:
             return None
         subject = payload.get("sub")

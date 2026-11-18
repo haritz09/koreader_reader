@@ -143,9 +143,7 @@ class EntityResolutionService:
         buckets: dict[str, set[str]] = defaultdict(set)
         for candidate in candidates:
             if candidate.entity_id not in settled and candidate.entity_id not in claimed:
-                buckets[normalize_name(candidate.name)[:_NAME_BUCKET_SIZE]].add(
-                    candidate.entity_id
-                )
+                buckets[normalize_name(candidate.name)[:_NAME_BUCKET_SIZE]].add(candidate.entity_id)
         for entity_ids in buckets.values():
             ordered = sorted(entity_ids)
             names = {entity_id: normalize_name(by_id[entity_id].name) for entity_id in ordered}

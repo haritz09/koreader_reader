@@ -12,7 +12,7 @@ EntityType = Literal[
     "other",
 ]
 
-# What the extraction prompt is asked for. 
+# What the extraction prompt is asked for.
 EXTRACTABLE_ENTITY_TYPES: tuple[str, ...] = (
     "character",
     "enemy",
@@ -28,6 +28,7 @@ FALLBACK_ENTITY_TYPE: Literal["other"] = "other"
 LOCATION_NODE_TYPE: Literal["location"] = "location"
 EVENT_NODE_TYPE: Literal["event"] = "event"
 
+
 @dataclass(frozen=True)
 class Entity:
     entity_id: str
@@ -40,6 +41,7 @@ class Entity:
     sub_type: str | None = None
     aliases: tuple[str, ...] = ()
     importance: int | None = None
+
 
 @dataclass(frozen=True)
 class Fact:

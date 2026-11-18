@@ -24,13 +24,9 @@ def build_llm_provider() -> FailoverLLMProvider | MockLLMProvider:
     if settings.llm_provider == "mock":
         if not settings.allow_mock_llm:
             raise RuntimeError("LLM_PROVIDER=mock requires ALLOW_MOCK_LLM=true")
-        logger.warning(
-            "Mock LLM provider enabled; extraction will return empty knowledge"
-        )
+        logger.warning("Mock LLM provider enabled; extraction will return empty knowledge")
         return MockLLMProvider()
-    return FailoverLLMProvider(
-        [OpenAIProvider(model=model) for model in llm_models()]
-    )
+    return FailoverLLMProvider([OpenAIProvider(model=model) for model in llm_models()])
 
 
 def build_embedding_provider() -> EmbeddingProvider:
@@ -38,9 +34,7 @@ def build_embedding_provider() -> EmbeddingProvider:
         raise RuntimeError(f"EMBEDDING_DIMENSIONS must be {EMBEDDING_DIMENSIONS}")
     if settings.embedding_provider == "mock":
         if not settings.allow_mock_embeddings:
-            raise RuntimeError(
-                "EMBEDDING_PROVIDER=mock requires ALLOW_MOCK_EMBEDDINGS=true"
-            )
+            raise RuntimeError("EMBEDDING_PROVIDER=mock requires ALLOW_MOCK_EMBEDDINGS=true")
         logger.warning("Mock embedding provider enabled; vectors are deterministic")
         return MockEmbeddingProvider()
     return GeminiEmbeddingProvider()

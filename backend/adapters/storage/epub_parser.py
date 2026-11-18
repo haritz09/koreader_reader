@@ -10,65 +10,65 @@ from core.ports.ebook_metadata import EbookMetadata
 
 
 class EpubParser:
-	async def parse(self, storage_path: str) -> list[Chapter]:
-		return await asyncio.to_thread(self._parse_sync, storage_path)
+    async def parse(self, storage_path: str) -> list[Chapter]:
+        return await asyncio.to_thread(self._parse_sync, storage_path)
 
-	async def read_metadata(self, storage_path: str) -> EbookMetadata:
-		return await asyncio.to_thread(self._read_metadata_sync, storage_path)
+    async def read_metadata(self, storage_path: str) -> EbookMetadata:
+        return await asyncio.to_thread(self._read_metadata_sync, storage_path)
 
-	async def extract_cover(self, storage_path: str) -> bytes | None:
-		return await asyncio.to_thread(self._extract_cover_sync, storage_path)
+    async def extract_cover(self, storage_path: str) -> bytes | None:
+        return await asyncio.to_thread(self._extract_cover_sync, storage_path)
 
-	@staticmethod
-	def _read_metadata_sync(storage_path: str) -> EbookMetadata:
-		book = epub.read_epub(storage_path)
-		titles = [
-			value.strip()
-			for value, _ in book.get_metadata("DC", "title")
-			if value and value.strip()
-		]
-		author = next(
-			(
-				value.strip()
-				for value, _ in book.get_metadata("DC", "creator")
-				if value and value.strip()
-			),
-			None,
-		)
-		return EbookMetadata(
-			title=titles[0] if titles else None,
-			author=author,
-		)
+    @staticmethod
+    def _read_metadata_sync(storage_path: str) -> EbookMetadata:
+        book = epub.read_epub(storage_path)
+        titles = [
+            value.strip()
+            for value, _ in book.get_metadata("DC", "title")
+            if value and value.strip()
+        ]
+        author = next(
+            (
+                value.strip()
+                for value, _ in book.get_metadata("DC", "creator")
+                if value and value.strip()
+            ),
+            None,
+        )
+        return EbookMetadata(
+            title=titles[0] if titles else None,
+            author=author,
+        )
 
-	@staticmethod
-	def _parse_sync(storage_path: str) -> list[Chapter]:
-		book = epub.read_epub(storage_path)
-		chapters: list[Chapter] = []
-		for chapter_index, item in enumerate(book.get_items_of_type(ITEM_DOCUMENT)):
-			soup = BeautifulSoup(item.get_content(), "html.parser")
-			text = " ".join(soup.stripped_strings)
-			if not text:
-				continue
-			chapters.append(
-				Chapter(
-					chapter_id=item.get_id(),
-					title=text.split(" ", 1)[0][:120],
-					text=text,
-					chapter_index=chapter_index,
-				)
-			)
-		return chapters
+    @staticmethod
+    def _parse_sync(storage_path: str) -> list[Chapter]:
+        book = epub.read_epub(storage_path)
+        chapters: list[Chapter] = []
+        for chapter_index, item in enumerate(book.get_items_of_type(ITEM_DOCUMENT)):
+            soup = BeautifulSoup(item.get_content(), "html.parser")
+            text = " ".join(soup.stripped_strings)
+            if not text:
+                continue
+            chapters.append(
+                Chapter(
+                    chapter_id=item.get_id(),
+                    title=text.split(" ", 1)[0][:120],
+                    text=text,
+                    chapter_index=chapter_index,
+                )
+            )
+        return chapters
 
-	@staticmethod
-	def _extract_cover_sync(storage_path: str) -> bytes | None:
-		book = epub.read_epub(storage_path)
-		for item in book.get_items_of_type(ITEM_COVER):
-			content = item.get_content()
-			if content:
-				return content
-		for item in book.get_items_of_type(ITEM_IMAGE):
-			if "cover" in item.get_name().lower():
-				content = item.get_content()
-				if content:
-					return content
-		return None
+    @staticmethod
+    def _extract_cover_sync(storage_path: str) -> bytes | None:
+        book = epub.read_epub(storage_path)
+        for item in book.get_items_of_type(ITEM_COVER):
+            content = item.get_content()
+            if content:
+                return content
+        for item in book.get_items_of_type(ITEM_IMAGE):
+            if "cover" in item.get_name().lower():
+                content = item.get_content()
+                if content:
+                    return content
+        return None

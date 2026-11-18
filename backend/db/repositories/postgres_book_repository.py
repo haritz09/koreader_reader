@@ -14,222 +14,222 @@ from db.models.knowledge import EntityRecord, EventRecord, FactRecord, LocationR
 
 
 class PostgresBookRepository:
-	def __init__(self, session: AsyncSession) -> None:
-		self._session = session
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
 
-	async def resolve_book_id(self, document_hash: str) -> str | None:
-		result = await self._session.execute(
-			select(Book.id).where(Book.document_hash == document_hash)
-		)
-		return result.scalar_one_or_none()
+    async def resolve_book_id(self, document_hash: str) -> str | None:
+        result = await self._session.execute(
+            select(Book.id).where(Book.document_hash == document_hash)
+        )
+        return result.scalar_one_or_none()
 
-	async def get_by_document_hash(self, document_hash: str) -> Book | None:
-		result = await self._session.execute(
-			select(Book).where(Book.document_hash == document_hash)
-		)
-		return result.scalar_one_or_none()
+    async def get_by_document_hash(self, document_hash: str) -> Book | None:
+        result = await self._session.execute(
+            select(Book).where(Book.document_hash == document_hash)
+        )
+        return result.scalar_one_or_none()
 
-	async def get_or_create(
-		self,
-		book_id: str,
-		document_hash: str,
-		storage_key: str,
-	) -> tuple[Book, bool]:
-		
-		statement = (
-			pg_insert(Book)
-			.values(
-				id=book_id,
-				document_hash=document_hash,
-				storage_key=storage_key,
-				processing_status=PENDING,
-				graph_revision=0,
-			)
-			.on_conflict_do_nothing(index_elements=[Book.document_hash])
-			.returning(Book)
-		)
-		result = await self._session.execute(statement)
-		created = result.scalar_one_or_none()
-		await self._session.commit()
-		if created is not None:
-			return created, True
+    async def get_or_create(
+        self,
+        book_id: str,
+        document_hash: str,
+        storage_key: str,
+    ) -> tuple[Book, bool]:
 
-		existing = await self.get_by_document_hash(document_hash)
-		if existing is None:
-			raise RuntimeError("Conflicting book disappeared during upload")
-		return existing, False
+        statement = (
+            pg_insert(Book)
+            .values(
+                id=book_id,
+                document_hash=document_hash,
+                storage_key=storage_key,
+                processing_status=PENDING,
+                graph_revision=0,
+            )
+            .on_conflict_do_nothing(index_elements=[Book.document_hash])
+            .returning(Book)
+        )
+        result = await self._session.execute(statement)
+        created = result.scalar_one_or_none()
+        await self._session.commit()
+        if created is not None:
+            return created, True
 
-	async def get_by_id(self, book_id: str) -> Book | None:
-		result = await self._session.execute(select(Book).where(Book.id == book_id))
-		return result.scalar_one_or_none()
+        existing = await self.get_by_document_hash(document_hash)
+        if existing is None:
+            raise RuntimeError("Conflicting book disappeared during upload")
+        return existing, False
 
-	async def mark_processing(self, book_id: str) -> None:
-		book = await self.get_by_id(book_id)
-		if book is None:
-			return
-		book.processing_status = PROCESSING
-		book.processing_error = None
-		await self._session.commit()
+    async def get_by_id(self, book_id: str) -> Book | None:
+        result = await self._session.execute(select(Book).where(Book.id == book_id))
+        return result.scalar_one_or_none()
 
-	async def mark_pending(self, book_id: str) -> None:
-		book = await self.get_by_id(book_id)
-		if book is None:
-			return
-		book.processing_status = PENDING
-		book.processing_error = None
-		await self._session.commit()
+    async def mark_processing(self, book_id: str) -> None:
+        book = await self.get_by_id(book_id)
+        if book is None:
+            return
+        book.processing_status = PROCESSING
+        book.processing_error = None
+        await self._session.commit()
 
-	async def replace_derived_content(
-		self,
-		book_id: str,
-		chapters: list,
-		chunks: list,
-	) -> None:
-		# Knowledge rows reference chunks, so they must go first.
-		for table in (EntityRecord, FactRecord, EventRecord, LocationRecord):
-			await self._session.execute(
-				table.__table__.delete().where(table.book_id == book_id)
-			)
-		await self._session.execute(
-			ChunkRecord.__table__.delete().where(ChunkRecord.book_id == book_id)
-		)
-		await self._session.execute(
-			ChapterRecord.__table__.delete().where(ChapterRecord.book_id == book_id)
-		)
-		self._session.add_all(
-			ChapterRecord(
-				id=chapter.chapter_id, book_id=book_id,
-				title=chapter.title, chapter_index=chapter.chapter_index,
-			)
-			for chapter in chapters
-		)
-		self._session.add_all(
-			ChunkRecord(
-				book_id=book_id, chapter_id=chunk.chapter_id,
-				chunk_index=chunk.chunk_index, text=chunk.text,
-				start_pctg=chunk.start_pctg, end_pctg=chunk.end_pctg,
-			)
-			for chunk in chunks
-		)
-		await self._session.commit()
+    async def mark_pending(self, book_id: str) -> None:
+        book = await self.get_by_id(book_id)
+        if book is None:
+            return
+        book.processing_status = PENDING
+        book.processing_error = None
+        await self._session.commit()
 
-	async def mark_ready(self, book_id: str) -> None:
-		book = await self.get_by_id(book_id)
-		if book is None:
-			return
-		book.processing_status = READY
-		book.processing_error = None
-		await self._session.commit()
+    async def replace_derived_content(
+        self,
+        book_id: str,
+        chapters: list,
+        chunks: list,
+    ) -> None:
+        # Knowledge rows reference chunks, so they must go first.
+        for table in (EntityRecord, FactRecord, EventRecord, LocationRecord):
+            await self._session.execute(table.__table__.delete().where(table.book_id == book_id))
+        await self._session.execute(
+            ChunkRecord.__table__.delete().where(ChunkRecord.book_id == book_id)
+        )
+        await self._session.execute(
+            ChapterRecord.__table__.delete().where(ChapterRecord.book_id == book_id)
+        )
+        self._session.add_all(
+            ChapterRecord(
+                id=chapter.chapter_id,
+                book_id=book_id,
+                title=chapter.title,
+                chapter_index=chapter.chapter_index,
+            )
+            for chapter in chapters
+        )
+        self._session.add_all(
+            ChunkRecord(
+                book_id=book_id,
+                chapter_id=chunk.chapter_id,
+                chunk_index=chunk.chunk_index,
+                text=chunk.text,
+                start_pctg=chunk.start_pctg,
+                end_pctg=chunk.end_pctg,
+            )
+            for chunk in chunks
+        )
+        await self._session.commit()
 
-	async def mark_partial(self, book_id: str, error: str) -> None:
-		book = await self.get_by_id(book_id)
-		if book is None:
-			return
-		book.processing_status = PARTIAL
-		book.processing_error = error[:2000]
-		await self._session.commit()
+    async def mark_ready(self, book_id: str) -> None:
+        book = await self.get_by_id(book_id)
+        if book is None:
+            return
+        book.processing_status = READY
+        book.processing_error = None
+        await self._session.commit()
 
-	async def mark_failed(self, book_id: str, error: str) -> None:
-		book = await self.get_by_id(book_id)
-		if book is None:
-			return
-		book.processing_status = FAILED
-		book.processing_error = error[:2000]
-		await self._session.commit()
+    async def mark_partial(self, book_id: str, error: str) -> None:
+        book = await self.get_by_id(book_id)
+        if book is None:
+            return
+        book.processing_status = PARTIAL
+        book.processing_error = error[:2000]
+        await self._session.commit()
 
-	async def count_chunks(self, book_id: str) -> int:
-		result = await self._session.execute(
-			select(func.count())
-			.select_from(ChunkRecord)
-			.where(ChunkRecord.book_id == book_id)
-		)
-		return result.scalar_one()
+    async def mark_failed(self, book_id: str, error: str) -> None:
+        book = await self.get_by_id(book_id)
+        if book is None:
+            return
+        book.processing_status = FAILED
+        book.processing_error = error[:2000]
+        await self._session.commit()
 
-	async def get_pending_chunks(self, book_id: str) -> list[tuple[str, Chunk]]:
-		result = await self._session.execute(
-			select(
-				ChunkRecord.id,
-				ChunkRecord.chapter_id,
-				ChunkRecord.chunk_index,
-				ChunkRecord.text,
-				ChunkRecord.start_pctg,
-				ChunkRecord.end_pctg,
-			)
-			.where(
-				ChunkRecord.book_id == book_id,
-				ChunkRecord.extracted_at.is_(None),
-			)
-			.order_by(ChunkRecord.chunk_index)
-		)
-		return [
-			(
-				row[0],
-				Chunk(
-					chapter_id=row[1],
-					chunk_index=row[2],
-					text=row[3],
-					start_pctg=row[4],
-					end_pctg=row[5],
-				),
-			)
-			for row in result.all()
-		]
+    async def count_chunks(self, book_id: str) -> int:
+        result = await self._session.execute(
+            select(func.count()).select_from(ChunkRecord).where(ChunkRecord.book_id == book_id)
+        )
+        return result.scalar_one()
 
-	async def get_state(self, book_id: str) -> BookState | None:
-		result = await self._session.execute(
-			select(
-				Book.id,
-				Book.processing_status,
-			).where(Book.id == book_id)
-		)
-		row = result.one_or_none()
-		if row is None:
-			return None
-		return BookState(
-			book_id=row[0],
-			processing_status=row[1],
-		)
+    async def get_pending_chunks(self, book_id: str) -> list[tuple[str, Chunk]]:
+        result = await self._session.execute(
+            select(
+                ChunkRecord.id,
+                ChunkRecord.chapter_id,
+                ChunkRecord.chunk_index,
+                ChunkRecord.text,
+                ChunkRecord.start_pctg,
+                ChunkRecord.end_pctg,
+            )
+            .where(
+                ChunkRecord.book_id == book_id,
+                ChunkRecord.extracted_at.is_(None),
+            )
+            .order_by(ChunkRecord.chunk_index)
+        )
+        return [
+            (
+                row[0],
+                Chunk(
+                    chapter_id=row[1],
+                    chunk_index=row[2],
+                    text=row[3],
+                    start_pctg=row[4],
+                    end_pctg=row[5],
+                ),
+            )
+            for row in result.all()
+        ]
 
-	async def set_metadata(
-		self, book_id: str, title: str | None, author: str | None
-	) -> None:
-		await self._session.execute(
-			update(Book)
-			.where(Book.id == book_id)
-			.values(title=title, author=author)
-		)
-		await self._session.commit()
+    async def get_state(self, book_id: str) -> BookState | None:
+        result = await self._session.execute(
+            select(
+                Book.id,
+                Book.processing_status,
+            ).where(Book.id == book_id)
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        return BookState(
+            book_id=row[0],
+            processing_status=row[1],
+        )
 
-	async def bump_graph_revision(self, book_id: str) -> int:
-		result = await self._session.execute(
-			update(Book)
-			.where(Book.id == book_id)
-			.values(graph_revision=Book.graph_revision + 1)
-			.returning(Book.graph_revision)
-		)
-		revision = result.scalar_one_or_none()
-		await self._session.commit()
-		return revision or 0
+    async def set_metadata(self, book_id: str, title: str | None, author: str | None) -> None:
+        await self._session.execute(
+            update(Book).where(Book.id == book_id).values(title=title, author=author)
+        )
+        await self._session.commit()
 
-	async def set_cover_path(self, book_id: str, cover_path: str) -> None:
-		book = await self.get_by_id(book_id)
-		if book is None:
-			return
-		book.cover_path = cover_path
-		await self._session.commit()
+    async def bump_graph_revision(self, book_id: str) -> int:
+        result = await self._session.execute(
+            update(Book)
+            .where(Book.id == book_id)
+            .values(graph_revision=Book.graph_revision + 1)
+            .returning(Book.graph_revision)
+        )
+        revision = result.scalar_one_or_none()
+        await self._session.commit()
+        return revision or 0
 
-	async def delete(self, book_id: str) -> None:
-		"""Hard-delete a book and its derived content.
+    async def set_cover_path(self, book_id: str, cover_path: str) -> None:
+        book = await self.get_by_id(book_id)
+        if book is None:
+            return
+        book.cover_path = cover_path
+        await self._session.commit()
 
-		Reserved for the future purge that runs once no active owner references
-		the book. Owner-facing removal is a soft delete on ``user_books`` and
-		must not call this.
-		"""
-		for table in (EntityRecord, FactRecord, EventRecord, LocationRecord, ChunkRecord, ChapterRecord):
-			await self._session.execute(
-				table.__table__.delete().where(table.book_id == book_id)
-			)
-		await self._session.execute(
-			delete(Book).where(Book.id == book_id)
-		)
-		await self._session.commit()
+    async def delete(self, book_id: str) -> None:
+        """Hard-delete a book and its derived content.
+
+        Reserved for the future purge that runs once no active owner references
+        the book. Owner-facing removal is a soft delete on ``user_books`` and
+        must not call this.
+        """
+        for table in (
+            EntityRecord,
+            FactRecord,
+            EventRecord,
+            LocationRecord,
+            ChunkRecord,
+            ChapterRecord,
+        ):
+            await self._session.execute(table.__table__.delete().where(table.book_id == book_id))
+        await self._session.execute(delete(Book).where(Book.id == book_id))
+        await self._session.commit()

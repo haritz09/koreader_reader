@@ -49,7 +49,5 @@ class RetrieveContextUseCase:
             book_id=book_id,
             position=position_value,
             model=self._embeddings.model,
-            chunks=tuple(
-                chunk for chunk in chunks if chunk.reading_position <= position_value
-            ),
+            chunks=tuple(chunk for chunk in chunks if chunk.reading_position <= position_value),
         )

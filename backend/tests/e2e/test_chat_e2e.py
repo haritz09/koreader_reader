@@ -105,6 +105,4 @@ def test_chat_sources_grow_with_reading_progress(
     assert opening_ids <= finished_ids
     assert len(finished_ids) > len(opening_ids)
     assert finished_ids <= set(positions)
-    assert all(
-        source["reading_position"] <= 1.0 for source in body["sources"]
-    )
+    assert all(source["reading_position"] <= 1.0 for source in body["sources"])

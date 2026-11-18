@@ -72,11 +72,7 @@ def fact(
 
 def edge_weight(graph, source: str, target: str) -> float:
     pair = {source, target}
-    return next(
-        edge.weight
-        for edge in graph.edges
-        if {edge.source_id, edge.target_id} == pair
-    )
+    return next(edge.weight for edge in graph.edges if {edge.source_id, edge.target_id} == pair)
 
 
 def test_mentions_collapse_into_canonical_nodes_and_edges_accumulate() -> None:
@@ -109,9 +105,7 @@ def test_mentions_collapse_into_canonical_nodes_and_edges_accumulate() -> None:
     assert edge_weight(graph, "c1", "c2") == pytest.approx(3.0)
     assert edge_weight(graph, "c1", "c3") == pytest.approx(1.0)
     assert edge_weight(graph, "location:paris", "event:duel") == pytest.approx(3.0)
-    assert all(
-        "unknown" not in node.node_id.lower() for node in graph.nodes
-    )
+    assert all("unknown" not in node.node_id.lower() for node in graph.nodes)
 
 
 def test_ambiguous_names_do_not_create_fact_edges() -> None:
@@ -195,7 +189,5 @@ def test_chunk_truncation_keeps_the_most_mentioned_nodes() -> None:
         "c2": 3,
         "c3": 2,
     }
-    assert graph.edges == (
-        ClusterEdge(source_id="c2", target_id="c3", weight=1.0),
-    )
+    assert graph.edges == (ClusterEdge(source_id="c2", target_id="c3", weight=1.0),)
     assert all("c1" not in {edge.source_id, edge.target_id} for edge in graph.edges)

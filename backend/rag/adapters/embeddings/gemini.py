@@ -109,9 +109,7 @@ class GeminiEmbeddingProvider:
             return
         detail = response.text[:300]
         if status in (401, 403, 404, 422):
-            raise EmbeddingConfigurationError(
-                f"Embedding configuration failed ({status})"
-            )
+            raise EmbeddingConfigurationError(f"Embedding configuration failed ({status})")
         if status == 429:
             daily, retry_after = classify_quota(response)
             if daily:
@@ -148,14 +146,10 @@ class GeminiEmbeddingProvider:
         for item in embeddings:
             values = item.get("values") if isinstance(item, dict) else None
             if not isinstance(values, list) or len(values) != self._dimensions:
-                raise EmbeddingTransientError(
-                    "embedding provider returned an invalid vector"
-                )
+                raise EmbeddingTransientError("embedding provider returned an invalid vector")
             vector = [float(value) for value in values]
             norm = math.sqrt(sum(value * value for value in vector))
             if norm == 0.0:
-                raise EmbeddingTransientError(
-                    "embedding provider returned an empty vector"
-                )
+                raise EmbeddingTransientError("embedding provider returned an empty vector")
             vectors.append([value / norm for value in vector])
         return vectors

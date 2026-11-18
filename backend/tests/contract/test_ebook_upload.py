@@ -23,9 +23,7 @@ class FakeUploadUseCase:
 
 
 def test_upload_endpoint_returns_book_identity_and_pending_status() -> None:
-    app.dependency_overrides[get_upload_ebook_use_case] = (
-        lambda: FakeUploadUseCase()
-    )
+    app.dependency_overrides[get_upload_ebook_use_case] = lambda: FakeUploadUseCase()
     client = TestClient(app)
 
     try:
@@ -50,9 +48,7 @@ class FakeOversizedUploadUseCase:
 
 
 def test_upload_endpoint_returns_413_for_oversized_upload() -> None:
-    app.dependency_overrides[get_upload_ebook_use_case] = (
-        lambda: FakeOversizedUploadUseCase()
-    )
+    app.dependency_overrides[get_upload_ebook_use_case] = lambda: FakeOversizedUploadUseCase()
     client = TestClient(app)
 
     try:
@@ -64,9 +60,7 @@ def test_upload_endpoint_returns_413_for_oversized_upload() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 413
-    assert response.json() == {
-        "detail": "Ebook exceeds the maximum size of 10485760 bytes"
-    }
+    assert response.json() == {"detail": "Ebook exceeds the maximum size of 10485760 bytes"}
 
 
 class FakeLibraryRepository:

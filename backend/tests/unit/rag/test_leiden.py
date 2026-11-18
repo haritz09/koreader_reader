@@ -43,8 +43,7 @@ def test_disconnected_cliques_become_separate_root_communities() -> None:
     graph = ClusterGraph(
         book_id="book-1",
         nodes=tuple(
-            complete_graph("a", [0.0, 0.1, 0.2, 0.3])
-            + complete_graph("b", [0.5, 0.6, 0.7, 0.8])
+            complete_graph("a", [0.0, 0.1, 0.2, 0.3]) + complete_graph("b", [0.5, 0.6, 0.7, 0.8])
         ),
         edges=tuple(complete_edges("a", 4) + complete_edges("b", 4)),
     )

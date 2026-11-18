@@ -36,9 +36,7 @@ class SyncProgressUseCase:
         self._library = library
         self._graph_queue = graph_queue
 
-    async def execute(
-        self, document_hash: str, position: float, owner_id: str
-    ) -> SyncResult:
+    async def execute(self, document_hash: str, position: float, owner_id: str) -> SyncResult:
         progress = await self._provider.resolve_progress(document_hash, position)
         if progress is None:
             raise BookNotFoundError(document_hash)
