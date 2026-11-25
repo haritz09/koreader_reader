@@ -3,14 +3,16 @@
 from core.domain.errors import BookNotFoundError, BookNotReadyError
 from core.domain.status import GRAPH_STATUSES
 from core.ports.library_repository import LibraryRepository
-from rag.application.retrieve import RetrieveContextUseCase
+from core.ports.llm_provider import LLMError
 from rag.domain.chat import AnswerDraft, ChatAnswer, ChatSource
 from rag.domain.errors import RagIndexNotReadyError
 from rag.domain.index_state import RagIndexState
-from rag.domain.retrieval import RetrievedChunk
+from rag.domain.retrieval import RetrievalResult, RetrievalStrategy, RetrievedChunk
 from rag.domain.status import RAG_INDEX_CURRENT_STATUSES
 from rag.ports.answer_provider import AnswerProvider
+from rag.ports.context_retriever import ContextRetriever
 from rag.ports.index_state import RagIndexReader
+from rag.ports.strategy_classifier import StrategyClassifier
 
 MAX_EXCERPT_CHARS = 400
 NO_EVIDENCE_ANSWER = "No visible text in this book answers that question yet."
@@ -21,14 +23,18 @@ class AnswerQuestionUseCase:
         self,
         library: LibraryRepository,
         index: RagIndexReader,
-        retrieval: RetrieveContextUseCase,
+        rag: ContextRetriever,
+        graph: ContextRetriever,
+        classifier: StrategyClassifier,
         answers: AnswerProvider,
         *,
         embedding_model: str,
     ) -> None:
         self._library = library
         self._index = index
-        self._retrieval = retrieval
+        self._rag = rag
+        self._graph = graph
+        self._classifier = classifier
         self._answers = answers
         self._embedding_model = embedding_model
 
@@ -50,11 +56,7 @@ class AnswerQuestionUseCase:
 
         await self._require_current_index(book_id)
 
-        context = await self._retrieval.execute(
-            book_id,
-            state.progress_position,
-            text,
-        )
+        context = await self._retrieve(text, book_id, state.progress_position)
         if not context.chunks:
             return ChatAnswer(
                 book_id=book_id,
@@ -72,6 +74,24 @@ class AnswerQuestionUseCase:
             answer=draft.text,
             sources=_cited_sources(context.chunks, draft),
         )
+
+    async def _retrieve(
+        self,
+        question: str,
+        book_id: str,
+        position: float,
+    ) -> RetrievalResult:
+        if await self._classify(question) is RetrievalStrategy.GRAPH:
+            context = await self._graph.execute(book_id, position, question)
+            if context.chunks:
+                return context
+        return await self._rag.execute(book_id, position, question)
+
+    async def _classify(self, question: str) -> RetrievalStrategy:
+        try:
+            return await self._classifier.classify_strategy(question)
+        except LLMError:
+            return RetrievalStrategy.RAG
 
     async def _require_current_index(self, book_id: str) -> None:
         index = await self._index.get_index_state(book_id)

@@ -9,6 +9,7 @@ from core.domain.value_objects.reading_position import InvalidReadingPositionErr
 from db.models.book import Book
 from db.models.chapter import ChapterRecord
 from db.models.chunk import ChunkRecord
+from db.models.knowledge import EntityRecord
 from db.session import session_factory
 from rag.adapters.persistence.models import RagEmbeddingRecord
 from rag.adapters.persistence.retrieval_repository import (
@@ -123,6 +124,28 @@ def seed_index() -> None:
                     ),
                 ]
             )
+            session.add_all(
+                [
+                    EntityRecord(
+                        id="early-entity",
+                        book_id=BOOK_ID,
+                        chunk_id="chunk-early",
+                        name="Jon",
+                        entity_type="character",
+                        reading_position=0.1,
+                        canonical_id="canon-jon",
+                    ),
+                    EntityRecord(
+                        id="late-entity",
+                        book_id=BOOK_ID,
+                        chunk_id="chunk-late",
+                        name="Jon",
+                        entity_type="character",
+                        reading_position=0.9,
+                        canonical_id="canon-jon",
+                    ),
+                ]
+            )
             await session.commit()
 
     asyncio.run(seed())
@@ -213,5 +236,29 @@ def test_repository_rejects_an_invalid_position() -> None:
     async def work(session: AsyncSession) -> None:
         with pytest.raises(InvalidReadingPositionError):
             await PostgresRetrievalRepository(session).search_chunks(BOOK_ID, 1.5, MODEL, QUERY, 10)
+
+    run_against_postgres(work)
+
+
+def test_knowledge_search_skips_chunk_rows_and_rows_without_a_chunk() -> None:
+    async def work(session: AsyncSession) -> None:
+        hits = await PostgresRetrievalRepository(session).search_knowledge(
+            BOOK_ID, 0.5, MODEL, QUERY, 10
+        )
+        assert [hit.chunk.chunk_id for hit in hits] == ["chunk-early"]
+        assert hits[0].canonical_id == "canon-jon"
+        assert all(hit.chunk.reading_position <= 0.5 for hit in hits)
+
+    run_against_postgres(work)
+
+
+def test_entity_expansion_respects_the_reading_position() -> None:
+    async def work(session: AsyncSession) -> None:
+        repository = PostgresRetrievalRepository(session)
+        visible = await repository.expand_entity_chunks(BOOK_ID, 0.5, ["canon-jon"], 10)
+        assert [chunk.chunk_id for chunk in visible] == ["chunk-early"]
+
+        finished = await repository.expand_entity_chunks(BOOK_ID, 1.0, ["canon-jon"], 10)
+        assert [chunk.chunk_id for chunk in finished] == ["chunk-early", "chunk-late"]
 
     run_against_postgres(work)

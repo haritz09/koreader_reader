@@ -28,7 +28,7 @@ from core.ports.llm_provider import (
 )
 from lib.http_quota import classify_quota, parse_retry_after
 from rag.domain.chat import AnswerDraft
-from rag.domain.retrieval import RetrievedChunk
+from rag.domain.retrieval import RetrievalStrategy, RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,18 @@ When the excerpts do not answer the question, say so in "answer" and return an \
 empty "citations" array.\
 """
 
+_STRATEGY_PROMPT = """\
+You pick how to look up a question about a book for a reader who has only read \
+part of it.
+
+Pick "graph" when the question asks who someone is, how two things relate, what \
+happened in an event, or names a character, place, artifact, or organization.
+Pick "rag" when the question is about the text itself or the book in general, asks for a quotation or \
+the writing, or names nothing in particular.
+
+Return ONLY valid JSON of the form {"strategy": "rag"} or {"strategy": "graph"}.\
+"""
+
 
 class OpenAIProvider:
     def __init__(
@@ -191,6 +203,16 @@ class OpenAIProvider:
             0.2,
         )
         return self._parse_answer(content)
+
+    async def classify_strategy(self, question: str) -> RetrievalStrategy:
+        content = await self._post_chat(
+            [
+                {"role": "system", "content": _STRATEGY_PROMPT},
+                {"role": "user", "content": question},
+            ],
+            0.0,
+        )
+        return _parse_strategy(content)
 
     async def _post_chat(
         self,
@@ -473,3 +495,10 @@ def _aliases(value: object, name: str) -> tuple[str, ...]:
 
 def _key(value: str) -> str:
     return " ".join(value.split()).casefold()
+
+
+def _parse_strategy(content: str) -> RetrievalStrategy:
+    try:
+        return RetrievalStrategy(json.loads(content).get("strategy"))
+    except (AttributeError, TypeError, ValueError):
+        return RetrievalStrategy.RAG

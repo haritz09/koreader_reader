@@ -9,7 +9,7 @@ from core.domain.entities.graph import EntityCandidate
 from core.domain.entities.knowledge import KnowledgeExtractionResult
 from core.ports.llm_provider import LLMQuotaExhaustedError
 from rag.domain.chat import AnswerDraft
-from rag.domain.retrieval import RetrievedChunk
+from rag.domain.retrieval import RetrievalStrategy, RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,9 @@ class FailoverLLMProvider:
         chunks: Sequence[RetrievedChunk],
     ) -> AnswerDraft:
         return await self._call("answer", question, chunks)
+
+    async def classify_strategy(self, question: str) -> RetrievalStrategy:
+        return await self._call("classify_strategy", question)
 
     async def _call(self, method: str, *args: object) -> object:
         now = time.monotonic()

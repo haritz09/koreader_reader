@@ -11,11 +11,12 @@ from api.dependencies import (
     get_library_repository,
     get_rag_index_reader,
     get_retrieval_repository,
+    get_strategy_classifier,
 )
 from main import app
 from rag.domain.chat import AnswerDraft
 from rag.domain.index_state import RagIndexState
-from rag.domain.retrieval import RetrievedChunk
+from rag.domain.retrieval import RetrievalStrategy, RetrievedChunk
 from rag.domain.status import RagIndexStatus
 from tests.fixtures.embeddings import FakeEmbeddingProvider
 from tests.fixtures.repositories import FakeLibraryRepository, reading_state
@@ -80,6 +81,11 @@ class CitingAnswerProvider:
         )
 
 
+class RagStrategyClassifier:
+    async def classify_strategy(self, question: str) -> RetrievalStrategy:
+        return RetrievalStrategy.RAG
+
+
 def post_chat(
     *,
     body: dict | None = None,
@@ -95,6 +101,7 @@ def post_chat(
         get_retrieval_repository: lambda: retrieval,
         get_embedding_provider: lambda: FakeEmbeddingProvider(),
         get_answer_provider: lambda: CitingAnswerProvider(),
+        get_strategy_classifier: lambda: RagStrategyClassifier(),
     }
     for dependency, override in overrides.items():
         app.dependency_overrides[dependency] = override

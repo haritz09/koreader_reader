@@ -59,10 +59,12 @@ from rag.adapters.persistence.repository import PostgresRagRepository
 from rag.adapters.persistence.retrieval_repository import PostgresRetrievalRepository
 from rag.application.answer_question import AnswerQuestionUseCase
 from rag.application.retrieve import RetrieveContextUseCase
+from rag.application.retrieve_graph import RetrieveGraphContextUseCase
 from rag.ports.answer_provider import AnswerProvider
 from rag.ports.embedding_provider import EmbeddingProvider
 from rag.ports.index_state import RagIndexReader
 from rag.ports.retrieval_repository import RetrievalRepository
+from rag.ports.strategy_classifier import StrategyClassifier
 
 
 def get_ebook_storage() -> EbookStorage:
@@ -316,6 +318,11 @@ def get_answer_provider() -> AnswerProvider:
     return build_llm_provider()
 
 
+@lru_cache
+def get_strategy_classifier() -> StrategyClassifier:
+    return build_llm_provider()
+
+
 def get_retrieve_context_use_case(
     repository: RetrievalRepository = Depends(get_retrieval_repository),
     embeddings: EmbeddingProvider = Depends(get_embedding_provider),
@@ -327,17 +334,33 @@ def get_retrieve_context_use_case(
     )
 
 
+def get_retrieve_graph_context_use_case(
+    repository: RetrievalRepository = Depends(get_retrieval_repository),
+    embeddings: EmbeddingProvider = Depends(get_embedding_provider),
+) -> RetrieveGraphContextUseCase:
+    return RetrieveGraphContextUseCase(
+        repository,
+        embeddings,
+        top_k=settings.retrieval_graph_top_k,
+        expansion_limit=settings.retrieval_graph_expansion_limit,
+    )
+
+
 def get_answer_question_use_case(
     library: LibraryRepository = Depends(get_library_repository),
     index: RagIndexReader = Depends(get_rag_index_reader),
-    retrieval: RetrieveContextUseCase = Depends(get_retrieve_context_use_case),
+    rag: RetrieveContextUseCase = Depends(get_retrieve_context_use_case),
+    graph: RetrieveGraphContextUseCase = Depends(get_retrieve_graph_context_use_case),
+    classifier: StrategyClassifier = Depends(get_strategy_classifier),
     answers: AnswerProvider = Depends(get_answer_provider),
     embeddings: EmbeddingProvider = Depends(get_embedding_provider),
 ) -> AnswerQuestionUseCase:
     return AnswerQuestionUseCase(
         library,
         index,
-        retrieval,
+        rag,
+        graph,
+        classifier,
         answers,
         embedding_model=embeddings.model,
     )

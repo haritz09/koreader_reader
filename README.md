@@ -46,7 +46,7 @@ frontend/
 | GET | `/api/v1/ebooks/{id}` | Book status |
 | DELETE | `/api/v1/ebooks/{id}` | Remove a book from the caller's library (204; 409 while processing) |
 | GET | `/api/v1/ebooks/{id}/graph` | Anti-spoiler graph at current position |
-| POST | `/api/v1/ebooks/{id}/chat` | Answer a question from text visible at the current position (409 until indexed) |
+| POST | `/api/v1/ebooks/{id}/chat` | Answer from text visible at the current position, using the retrieval strategy the classifier picks (409 until indexed) |
 | GET | `/api/v1/ebooks/{id}/events` | SSE: processing status (`ready`, `failed`, or `partial`) |
 | GET | `/api/v1/ebooks/{id}/position-events` | SSE: reading position change |
 | GET | `/api/v1/ebooks/{id}/cover` | Book cover |
@@ -76,6 +76,12 @@ httpOnly cookie; a device without a browser, such as KOReader, sends the token a
 ### Entity Importance
 - 1=protagonist, 2=secondary, 3=tertiary (nullable)
 - Derived as `min()` of visible mentions — rises with the plot without spoilers
+
+### Chat Retrieval
+- A small LLM call classifies each question as `rag` (chunk vectors) or `graph` (entity, fact, event, and location vectors).
+- The graph strategy resolves knowledge hits to their chunks and expands resolved entities to their other visible mentions. It falls back to `rag` when nothing is visible.
+- Both strategies return the same `RetrievalResult`, so the answer and its `sources` are shaped identically.
+- Every lookup filters `reading_position <= stored_position` in the repository. Community summaries are still not generated or read.
 
 ## Local Execution
 

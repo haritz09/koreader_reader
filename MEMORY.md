@@ -54,7 +54,8 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 - `EMBEDDING_PROVIDER=mock` requires `ALLOW_MOCK_EMBEDDINGS=true`. The e2e stack uses it so CI never calls a real embedding API.
 - The cluster graph uses canonical entity nodes plus `location:{normalized_name}` and `event:{normalized_name}` nodes. Edges come from chunk co-occurrence and resolved facts; ambiguous or unresolved fact endpoints produce no edge.
 - Communities are hierarchical Leiden (`leidenalg` + `igraph`) with a fixed seed and `RBConfigurationVertexPartition`. Community ids are `uuid5(book_id, level, seed_node_id)`; `signature_hash` detects when a community's membership changes.
-- Cluster structure is computed over the whole book. Any future read path must filter community members and metrics by `reading_position`; never expose post-position members or summaries.
+- Cluster structure is computed over the whole book. Any read path must filter community members and metrics by `reading_position`; never expose post-position members or summaries.
+- Chat reads the non-chunk embeddings: `search_knowledge` ranks entity, fact, event, and location vectors, resolves each hit to its source chunk, and `expand_entity_chunks` adds the other visible mentions of a resolved entity. Both queries filter `reading_position <= position` and skip rows without a chunk. Hierarchical communities and their summaries are still not read.
 - `rag_index_states` has its own status vocabulary: `pending`, `building`, `ready`, `partial`, `failed`. It never changes or mirrors the book processing lifecycle.
 - A RAG build is needed when the graph revision or embedding model changes, the index is missing or failed, or a build was deferred for quota. A stale `building` state is reclaimed after `RAG_BUILD_STALE_SECONDS` (default 7200); `claim_build` makes the claim atomic with `INSERT ... ON CONFLICT ... WHERE ... RETURNING`, so two jobs never build the same book at once.
 - Daily embedding quota is distinct from a per-minute rate limit. It marks the index `pending` and re-enqueues the job with a defer, so the build recovers on its own; per-minute limits stay transient and retry in-process. A deferred retry uses its own ARQ job id because reusing the running id is silently dropped.
@@ -69,7 +70,9 @@ Durable decisions and constraints only. Repository operating rules belong in `AG
 ## Chat
 
 - `POST /api/v1/ebooks/{book_id}/chat` is one-shot: no history and no streaming. It reads the caller's stored `user_books.progress_position` and never accepts a position from the request.
-- The chat path answers only from retrieved chunk evidence. Hierarchical communities and graph nodes are not used in v1.
+- The chat path answers only from retrieved chunk evidence. A small LLM classifier chooses between two strategies, both returning the same `RetrievalResult`: `rag` searches chunk embeddings only, and `graph` searches entity, fact, event, and location embeddings, resolves them to chunks, and expands resolved entities to their other visible mentions. `graph` falls back to `rag` when it finds nothing.
+- The classifier receives only the question. It never sees book text or a reading position, and a classifier failure falls back to `rag` instead of failing the request.
+- Hierarchical communities are not used by chat.
 - Chat is gated on the book being `ready` or `partial` and on the RAG index being `ready` or `partial` with the embedding model the API is currently configured to query. Any other state returns 409 before embedding or answering.
 - `sources` contains exactly the retrieved chunks the model cited, deduplicated and returned in retrieval order. Each source carries the chunk id, index, reading position, distance, and a bounded excerpt.
 - When no chunk is visible at the stored position, the use case returns a fixed non-empty answer without calling the LLM.
